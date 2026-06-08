@@ -1,13 +1,35 @@
-# Roblox Studio Lite Co-Pilot & Sync System (MCP + GitHub)
+# Roblox Studio Lite Co-Pilot & Sync System (MCP + GitHub) — v2.2.0
 
-This project turns your Roblox Studio Lite (mobile studio or PC Studio) into an interactive AI-assisted game development environment. It combines **GitHub Auto-Sync** and **In-game Gemini AI Co-pilot Chat**.
+This project turns your Roblox Studio Lite (mobile studio or PC Studio) into an interactive AI-assisted game development environment. It combines **GitHub Auto-Sync** and **In-game Gemini AI Co-pilot Chat** with advanced UI animations.
 
 ---
 
 ## 🌟 Features
-1. **Dynamic GitHub Sync**: Write code in `src/main.lua` of this repository, commit/push, and the script instantly runs in your active Roblox game playtest without restarts.
-2. **AI Co-pilot Chat UI**: A floating dark-mode UI in Roblox where you can chat with Gemini, ask it to write code, and it runs the code in your workspace instantly!
-3. **DataStore Memory**: Your Gemini API Key and custom GitHub Raw URLs are saved using Roblox DataStore so they persist across game sessions.
+
+### 1. In-game Gemini Co-pilot (Chat)
+*   Type commands (e.g. `"make a green neon stairs"` or `"workspace'e bir araba yerleştir"`) directly into the in-game console.
+*   The system sends your prompt to Google's Gemini models, returns raw Lua code, and instantly runs it in-game.
+
+### 2. Supported Google Gemini Models
+Easily select the model provider in the Settings grid:
+*   **Gemini 3.5 Flash** (Default, very fast and accurate)
+*   **Gemini 3.5 Pro** (Excellent reasoning for complex coding)
+*   **Gemini 3.1 Flash**
+*   **Gemini 3.1 Pro**
+*   **Gemini 3.0 Flash**
+*   **Custom Model**: Provide a custom model override text name (e.g., `gemini-flash-latest` or experimental models).
+
+### 3. Dynamic GitHub Sync
+*   Write code in `src/main.lua` of this repository, commit/push, and the script instantly runs in your active Roblox game playtest without restarts.
+
+### 4. Advanced Smooth UI (Client/Server Hybrid)
+*   **Tactile Hover & Clicks**: Buttons smoothly scale up and glow when hovered, shrinking slightly on click.
+*   **Elastic Panel Open/Close**: Clicking the ⚡ button triggers an elastic scaling transition.
+*   **Tabs Transition**: Seamlessly switch between Chat, Sync, Settings, and Logs.
+*   **Unified State Bridge**: Multi-developer sync allows everyone in the game to see logs and configurations updated in real-time.
+
+### 5. Changelog / Log Viewer
+*   A dedicated **Logs (📜)** tab listing version updates, changes, and historical updates.
 
 ---
 
@@ -25,24 +47,20 @@ To allow communication between Roblox, Gemini, and GitHub, you must enable these
 
 ### Step 2: Install the Loader Script
 1. In the Explorer, add a new **`Script`** inside **`ServerScriptService`**.
-2. Copy the entire contents of [loader.lua](file:///data/data/com.termux/files/home/roblox-studio-lite-sync/loader.lua) (from this repository) and paste it into the script.
+2. Copy the entire contents of [loader.lua](file:///data/data/com.termux/files/home/roblox-studio-lite-sync/loader.lua) and paste it into the script.
 3. Start the game (Play/Test).
 
 ---
 
 ## 🚀 How to Use
 
-### 1. In-Game AI Co-Pilot (Chat)
-1. When you join the game, you will see a floating **⚡ button** in the bottom-right corner. Click it to open the panel.
-2. Go to the **Settings (⚙️)** tab:
-   *   Enter your **Gemini API Key**. (Get one for free at [Google AI Studio](https://aistudio.google.com/)).
-   *   *(Optional)* Enter your GitHub raw URL if you are using a different repository.
-   *   Click **Save Config**.
-3. Go back to the **AI Chat (💬)** tab:
-   *   Type a command (e.g., `"workspace'e 10 tane kırmızı dönen küre ekle"` or `"create a giant neon staircase in front of me"`).
-   *   Press Enter or click **Send**.
-   *   The Gemini AI will generate the Lua code, print a confirmation, and execute the code live in the game!
+### 1. Configure the API Key
+1. When you join, click the **⚡ button** in the bottom-right corner.
+2. Navigate to the **Config (⚙️)** tab.
+3. Paste your Google Gemini API key (Get a free one at [Google AI Studio](https://aistudio.google.com/)).
+4. Select one of the **Gemini 3.0/3.1/3.5** models or select **Custom** and type a specific model ID.
+5. Click **Save Config**.
 
-### 2. GitHub Syncing
-*   Any code written in `src/main.lua` will be automatically executed in your Roblox game within 3 seconds of being pushed to the `main` branch of this repository.
-*   You can toggle auto-sync on/off in the **Settings** tab.
+### 2. Auto-Sync Setup
+*   Your loader automatically polls the raw URL for `src/main.lua`. You can change the URL in the Settings config to match your custom repository if you fork this project.
+*   Toggle auto-sync on/off directly from the settings interface.

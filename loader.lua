@@ -2,285 +2,178 @@
 	Studio Lite AI Co-Pilot & GitHub Sync Loader
 	Place this inside a Script in ServerScriptService.
 	Make sure HttpService and LoadstringEnabled are active!
+	
+	Design Read: Roblox in-game development utility UI, with a dark-tech neon-accented 
+	glassmorphic visual language, leaning toward dark mode container designs + rich micro-interactions.
 --]]
 
-local HttpService = game:GetService("HttpService")
-local Players = game:GetService("Players")
-local DataStoreService = game:GetService("DataStoreService")
-local MarketplaceService = game:GetService("MarketplaceService")
+local RunService = game:GetService("RunService")
 
--- Configuration & State
-local config = {
-	API_Key = "",
-	GitHub_URL = "https://raw.githubusercontent.com/Baran3575/roblox-studio-lite-sync/main/src/main.lua",
-	Sync_Enabled = true,
-	Sync_Interval = 3
-}
-
--- Try to load configuration from DataStore
-local configStore
-pcall(function()
-	configStore = DataStoreService:GetDataStore("StudioLiteAIConfig_v2")
-	local saved = configStore:GetAsync("Config")
-	if saved then
-		for k, v in pairs(saved) do
-			config[k] = v
-		end
-	end
-end)
-
-local lastGitHubCode = ""
-
--- Safe save configuration function
-local function saveConfig()
-	pcall(function()
-		if configStore then
-			configStore:SetAsync("Config", config)
-		end
-	end)
-end
-
--- Retrieve Game Info
-local placeId = game.PlaceId
-local gameId = game.GameId
-local placeName = "Local Studio Playtest"
-pcall(function()
-	if placeId > 0 then
-		placeName = MarketplaceService:GetProductInfo(placeId).Name
-	end
-end)
-
--- Clean markdown codeblocks from AI output
-local function cleanLuaCode(text)
-	text = text:gsub("^%s*```lua%s*", "")
-	text = text:gsub("^%s*```%s*", "")
-	text = text:gsub("%s*```%s*$", "")
-	return text
-end
-
--- Talk to Gemini API
-local function askGemini(prompt)
-	if not config.API_Key or config.API_Key == "" then
-		return false, "API Key is missing! Set it in Settings."
-	end
-
-	local url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=" .. config.API_Key
+if RunService:IsClient() then
+	-- =========================================================================
+	-- CLIENT-SIDE CONTROLLER (Smooth UI Tweens, Hover Effects, and Tab Handling)
+	-- =========================================================================
 	
-	local systemPrompt = [[
-You are an expert Roblox Lua developer. The user wants to write a script for their Roblox game.
-Generate ONLY the executable Lua code. Do not wrap the output in markdown code blocks like ```lua. Return the raw script text.
-Do not provide text explanations, only Lua code with comments if necessary.
-Make sure to use modern Roblox practices (e.g. task.wait, task.spawn) and directly interact with game/workspace.
-User Request: 
-]]
-
-	local payload = {
-		contents = {
-			{
-				parts = {
-					{ text = systemPrompt .. prompt }
-				}
-			}
-		}
+	local TweenService = game:GetService("TweenService")
+	local Players = game:GetService("Players")
+	local ReplicatedStorage = game:GetService("ReplicatedStorage")
+	
+	local player = Players.LocalPlayer
+	local ScreenGui = script.Parent
+	local MainPanel = ScreenGui:WaitForChild("MainPanel")
+	local ToggleBtn = ScreenGui:WaitForChild("ToggleBtn")
+	
+	-- Content Panels
+	local ContentFrame = MainPanel:WaitForChild("ContentFrame")
+	local ChatPanel = ContentFrame:WaitForChild("ChatPanel")
+	local SyncPanel = ContentFrame:WaitForChild("SyncPanel")
+	local SettingsPanel = ContentFrame:WaitForChild("SettingsPanel")
+	local ChangelogPanel = ContentFrame:WaitForChild("ChangelogPanel")
+	
+	-- Tabs
+	local TabContainer = MainPanel:WaitForChild("TabContainer")
+	local ActiveBar = TabContainer:WaitForChild("ActiveBar")
+	
+	-- Networking
+	local SyncEvent = ReplicatedStorage:WaitForChild("StudioLiteSyncEvent")
+	
+	-- State
+	local currentTab = "Chat"
+	local panelOpen = true
+	local apiConfig = {
+		API_Key = "",
+		GitHub_URL = "",
+		Sync_Enabled = true,
+		Model = "gemini-3.5-flash",
+		Custom_Model = ""
 	}
 
-	local success, response = pcall(function()
-		return HttpService:PostAsync(
-			url,
-			HttpService:JSONEncode(payload),
-			Enum.HttpContentType.ApplicationJson
-		)
-	end)
-
-	if not success then
-		return false, "HTTP Error: " .. tostring(response)
+	-- Animation Helpers
+	local function tween(object, info, propertyTable)
+		local t = TweenService:Create(object, info, propertyTable)
+		t:Play()
+		return t
 	end
 
-	local dataSuccess, decoded = pcall(function()
-		return HttpService:JSONDecode(response)
-	end)
+	local fastInfo = TweenInfo.new(0.2, Enum.EasingStyle.Quart, Enum.EasingDirection.Out)
+	local elasticInfo = TweenInfo.new(0.5, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
 
-	if not dataSuccess or not decoded then
-		return false, "Failed to decode response."
+	-- Tactile button hover/click animations
+	local function addTactileFeedback(button, defaultColor, hoverColor)
+		button.MouseEnter:Connect(function()
+			tween(button, fastInfo, {
+				BackgroundColor3 = hoverColor,
+				Size = UDim2.new(button.Size.X.Scale, button.Size.X.Offset + 4, button.Size.Y.Scale, button.Size.Y.Offset + 2)
+			})
+		end)
+		
+		button.MouseLeave:Connect(function()
+			tween(button, fastInfo, {
+				BackgroundColor3 = defaultColor,
+				Size = UDim2.new(button.Size.X.Scale, button.Size.X.Offset - 4, button.Size.Y.Scale, button.Size.Y.Offset - 2)
+			})
+		end)
+		
+		button.MouseButton1Down:Connect(function()
+			tween(button, fastInfo, {
+				Size = UDim2.new(button.Size.X.Scale, button.Size.X.Offset - 2, button.Size.Y.Scale, button.Size.Y.Offset - 2)
+			})
+		end)
 	end
 
-	local generatedText = decoded.candidates
-		and decoded.candidates[1]
-		and decoded.candidates[1].content
-		and decoded.candidates[1].content.parts
-		and decoded.candidates[1].content.parts[1]
-		and decoded.candidates[1].content.parts[1].text
-
-	if not generatedText then
-		return false, "Empty response from AI model."
-	end
-
-	return true, cleanLuaCode(generatedText)
-end
-
--- Helper: Create UI elements programmatically
-local function createUI(player)
-	-- Clean up existing UI if any
-	local existing = player:WaitForChild("PlayerGui"):FindFirstChild("StudioLiteSyncUI")
-	if existing then existing:Destroy() end
-
-	local ScreenGui = Instance.new("ScreenGui")
-	ScreenGui.Name = "StudioLiteSyncUI"
-	ScreenGui.ResetOnSpawn = false
-	ScreenGui.Parent = player:WaitForChild("PlayerGui")
-
-	-- Toggle Button
-	local ToggleBtn = Instance.new("TextButton")
-	ToggleBtn.Name = "ToggleBtn"
-	ToggleBtn.Size = UDim2.new(0, 50, 0, 50)
-	ToggleBtn.Position = UDim2.new(0.95, -50, 0.9, -50)
-	ToggleBtn.BackgroundColor3 = Color3.fromRGB(20, 20, 25)
-	ToggleBtn.BorderSizePixel = 0
-	ToggleBtn.Text = "⚡"
-	ToggleBtn.TextColor3 = Color3.fromRGB(0, 200, 255)
-	ToggleBtn.TextSize = 24
-	ToggleBtn.Parent = ScreenGui
-
-	local ToggleCorner = Instance.new("UICorner")
-	ToggleCorner.CornerRadius = UDim.new(0, 25)
-	ToggleCorner.Parent = ToggleBtn
-
-	local ToggleGlow = Instance.new("UIStroke")
-	ToggleGlow.Color = Color3.fromRGB(0, 150, 255)
-	ToggleGlow.Width = 2
-	ToggleGlow.Parent = ToggleBtn
-
-	-- Main Panel
-	local MainPanel = Instance.new("Frame")
-	MainPanel.Name = "MainPanel"
-	MainPanel.Size = UDim2.new(0, 420, 0, 500)
-	MainPanel.Position = UDim2.new(0.5, -210, 0.5, -250)
-	MainPanel.BackgroundColor3 = Color3.fromRGB(20, 20, 25)
-	MainPanel.BackgroundTransparency = 0.05
-	MainPanel.BorderSizePixel = 0
-	MainPanel.Visible = true
-	MainPanel.Parent = ScreenGui
-
-	local PanelCorner = Instance.new("UICorner")
-	PanelCorner.CornerRadius = UDim.new(0, 12)
-	PanelCorner.Parent = MainPanel
-
-	local PanelStroke = Instance.new("UIStroke")
-	PanelStroke.Color = Color3.fromRGB(45, 45, 55)
-	PanelStroke.Width = 1.5
-	PanelStroke.Parent = MainPanel
-
-	-- Title
-	local Title = Instance.new("TextLabel")
-	Title.Size = UDim2.new(1, 0, 0, 40)
-	Title.BackgroundTransparency = 1
-	Title.Text = " STUDIO LITE CO-PILOT"
-	Title.TextColor3 = Color3.fromRGB(240, 240, 250)
-	Title.TextSize = 16
-	Title.Font = Enum.Font.GothamBold
-	Title.TextXAlignment = Enum.TextXAlignment.Left
-	Title.Parent = MainPanel
-
-	local TitlePadding = Instance.new("UIPadding")
-	TitlePadding.PaddingLeft = UDim.new(0, 15)
-	TitlePadding.Parent = Title
-
-	-- Tabs Layout
-	local TabContainer = Instance.new("Frame")
-	TabContainer.Size = UDim2.new(1, 0, 0, 35)
-	TabContainer.Position = UDim2.new(0, 0, 0, 40)
-	TabContainer.BackgroundColor3 = Color3.fromRGB(15, 15, 18)
-	TabContainer.BorderSizePixel = 0
-	TabContainer.Parent = MainPanel
-
-	local function makeTabButton(name, text, posX)
-		local btn = Instance.new("TextButton")
-		btn.Name = name .. "TabBtn"
-		btn.Size = UDim2.new(0.33, 0, 1, 0)
-		btn.Position = UDim2.new(posX, 0, 0, 0)
-		btn.BackgroundTransparency = 1
-		btn.Text = text
-		btn.TextColor3 = Color3.fromRGB(150, 150, 160)
-		btn.TextSize = 12
-		btn.Font = Enum.Font.GothamSemibold
-		btn.Parent = TabContainer
-		return btn
-	end
-
-	local ChatTabBtn = makeTabButton("Chat", "💬 AI Chat", 0)
-	local SyncTabBtn = makeTabButton("Sync", "🔗 GitHub Sync", 0.33)
-	local SettingsTabBtn = makeTabButton("Settings", "⚙️ Settings", 0.66)
-
-	-- Active Indicator
-	local ActiveBar = Instance.new("Frame")
-	ActiveBar.Size = UDim2.new(0.33, 0, 0, 2)
-	ActiveBar.Position = UDim2.new(0, 0, 1, -2)
-	ActiveBar.BackgroundColor3 = Color3.fromRGB(0, 200, 255)
-	ActiveBar.BorderSizePixel = 0
-	ActiveBar.Parent = TabContainer
-
-	-- Content Frames
-	local ContentFrame = Instance.new("Frame")
-	ContentFrame.Size = UDim2.new(1, 0, 1, -75)
-	ContentFrame.Position = UDim2.new(0, 0, 0, 75)
-	ContentFrame.BackgroundTransparency = 1
-	ContentFrame.Parent = MainPanel
-
-	-- 1. Chat Tab Panel
-	local ChatPanel = Instance.new("Frame")
-	ChatPanel.Size = UDim2.new(1, 0, 1, 0)
-	ChatPanel.BackgroundTransparency = 1
-	ChatPanel.Visible = true
-	ChatPanel.Parent = ContentFrame
-
-	local LogBox = Instance.new("ScrollingFrame")
-	LogBox.Size = UDim2.new(1, -20, 1, -60)
-	LogBox.Position = UDim2.new(0, 10, 0, 10)
-	LogBox.BackgroundTransparency = 1
-	LogBox.CanvasSize = UDim2.new(0, 0, 0, 0)
-	LogBox.AutomaticCanvasSize = Enum.AutomaticCanvasSize.Y
-	LogBox.Parent = ChatPanel
-
-	local LogLayout = Instance.new("UIListLayout")
-	LogLayout.SortOrder = Enum.SortOrder.LayoutOrder
-	LogLayout.Padding = UDim.new(0, 8)
-	LogLayout.Parent = LogBox
-
-	local ChatInput = Instance.new("TextBox")
-	ChatInput.Size = UDim2.new(1, -90, 0, 35)
-	ChatInput.Position = UDim2.new(0, 10, 1, -45)
-	ChatInput.BackgroundColor3 = Color3.fromRGB(28, 28, 35)
-	ChatInput.PlaceholderText = "Ask AI to generate and run code..."
-	ChatInput.Text = ""
-	ChatInput.TextColor3 = Color3.fromRGB(240, 240, 250)
-	ChatInput.TextSize = 13
-	ChatInput.Font = Enum.Font.Gotham
-	ChatInput.ClearTextOnFocus = false
-	ChatInput.Parent = ChatPanel
-
-	local InputCorner = Instance.new("UICorner")
-	InputCorner.CornerRadius = UDim.new(0, 6)
-	InputCorner.Parent = ChatInput
+	-- Apply tactile animations to main buttons
+	addTactileFeedback(ToggleBtn, Color3.fromRGB(20, 20, 25), Color3.fromRGB(30, 30, 40))
 	
-	local InputPadding = Instance.new("UIPadding")
-	InputPadding.PaddingLeft = UDim.new(0, 8)
-	InputPadding.Parent = ChatInput
+	-- Setup Panel Open/Close
+	ToggleBtn.Activated:Connect(function()
+		panelOpen = not panelOpen
+		if panelOpen then
+			MainPanel.Visible = true
+			MainPanel.Size = UDim2.new(0, 0, 0, 0)
+			MainPanel.BackgroundTransparency = 1
+			tween(MainPanel, elasticInfo, {
+				Size = UDim2.new(0, 440, 0, 520),
+				BackgroundTransparency = 0.05
+			})
+		else
+			local t = tween(MainPanel, fastInfo, {
+				Size = UDim2.new(0, 0, 0, 0),
+				BackgroundTransparency = 1
+			})
+			t.Completed:Connect(function()
+				if not panelOpen then MainPanel.Visible = false end
+			end)
+		end
+	end)
 
-	local SendBtn = Instance.new("TextButton")
-	SendBtn.Size = UDim2.new(0, 70, 0, 35)
-	SendBtn.Position = UDim2.new(1, -80, 1, -45)
-	SendBtn.BackgroundColor3 = Color3.fromRGB(0, 150, 255)
-	SendBtn.Text = "Send"
-	SendBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-	SendBtn.Font = Enum.Font.GothamBold
-	SendBtn.TextSize = 13
-	SendBtn.Parent = ChatPanel
+	-- Tab Handler
+	local function setTab(tabName)
+		currentTab = tabName
+		ChatPanel.Visible = (tabName == "Chat")
+		SyncPanel.Visible = (tabName == "Sync")
+		SettingsPanel.Visible = (tabName == "Settings")
+		ChangelogPanel.Visible = (tabName == "Changelog")
 
-	local SendCorner = Instance.new("UICorner")
-	SendCorner.CornerRadius = UDim.new(0, 6)
-	SendCorner.Parent = SendBtn
+		-- Animate Indicator Bar
+		local positions = {
+			Chat = UDim2.new(0, 0, 1, -2),
+			Sync = UDim2.new(0.25, 0, 1, -2),
+			Settings = UDim2.new(0.5, 0, 1, -2),
+			Changelog = UDim2.new(0.75, 0, 1, -2)
+		}
+		tween(ActiveBar, fastInfo, {Position = positions[tabName]})
+		
+		-- Fade in active content
+		local activeFrame = ContentFrame:FindFirstChild(tabName .. "Panel")
+		if activeFrame then
+			activeFrame.Size = UDim2.new(1, 0, 0.95, 0)
+			activeFrame.GroupColor3 = Color3.fromRGB(255, 255, 255)
+		end
+	end
 
-	-- Function to append a log message
+	TabContainer.ChatTabBtn.Activated:Connect(function() setTab("Chat") end)
+	TabContainer.SyncTabBtn.Activated:Connect(function() setTab("Sync") end)
+	TabContainer.SettingsTabBtn.Activated:Connect(function() setTab("Settings") end)
+	TabContainer.ChangelogTabBtn.Activated:Connect(function() setTab("Changelog") end)
+
+	-- Model selection grid logic
+	local modelGrid = SettingsPanel:WaitForChild("SettingsList"):WaitForChild("ModelGrid")
+	local customModelBox = SettingsPanel.SettingsList:WaitForChild("CustomModelInput")
+	
+	local function updateModelSelectionUI(selectedModel)
+		for _, child in ipairs(modelGrid:GetChildren()) do
+			if child:IsA("TextButton") then
+				if child.Name == selectedModel then
+					child.BackgroundColor3 = Color3.fromRGB(0, 150, 255)
+					child.TextColor3 = Color3.fromRGB(255, 255, 255)
+				else
+					child.BackgroundColor3 = Color3.fromRGB(35, 35, 45)
+					child.TextColor3 = Color3.fromRGB(180, 180, 190)
+				end
+			end
+		end
+		
+		if selectedModel == "custom" then
+			customModelBox.Visible = true
+		else
+			customModelBox.Visible = false
+		end
+	end
+
+	for _, child in ipairs(modelGrid:GetChildren()) do
+		if child:IsA("TextButton") then
+			child.Activated:Connect(function()
+				apiConfig.Model = child.Name
+				updateModelSelectionUI(child.Name)
+			end)
+		end
+	end
+
+	-- Send Message Logic
+	local SendBtn = ChatPanel:WaitForChild("SendBtn")
+	local ChatInput = ChatPanel:WaitForChild("ChatInput")
+	local LogBox = ChatPanel:WaitForChild("LogBox")
+
 	local function appendLog(text, color)
 		local log = Instance.new("TextLabel")
 		log.Size = UDim2.new(1, 0, 0, 0)
@@ -293,323 +186,819 @@ local function createUI(player)
 		log.TextWrapped = true
 		log.TextXAlignment = Enum.TextXAlignment.Left
 		log.Parent = LogBox
-	end
-
-	-- 2. Sync Tab Panel
-	local SyncPanel = Instance.new("Frame")
-	SyncPanel.Size = UDim2.new(1, 0, 1, 0)
-	SyncPanel.BackgroundTransparency = 1
-	SyncPanel.Visible = false
-	SyncPanel.Parent = ContentFrame
-
-	local SyncList = Instance.new("Frame")
-	SyncList.Size = UDim2.new(1, -20, 1, -20)
-	SyncList.Position = UDim2.new(0, 10, 0, 10)
-	SyncList.BackgroundTransparency = 1
-	SyncList.Parent = SyncPanel
-
-	local SyncLayout = Instance.new("UIListLayout")
-	SyncLayout.Padding = UDim.new(0, 10)
-	SyncLayout.Parent = SyncList
-
-	local function makeInfoLabel(title, value)
-		local frame = Instance.new("Frame")
-		frame.Size = UDim2.new(1, 0, 0, 40)
-		frame.BackgroundColor3 = Color3.fromRGB(28, 28, 35)
-		frame.BorderSizePixel = 0
-		frame.Parent = SyncList
-
-		local corner = Instance.new("UICorner")
-		corner.CornerRadius = UDim.new(0, 6)
-		corner.Parent = frame
-
-		local lblTitle = Instance.new("TextLabel")
-		lblTitle.Size = UDim2.new(0.4, 0, 1, 0)
-		lblTitle.BackgroundTransparency = 1
-		lblTitle.Text = title
-		lblTitle.TextColor3 = Color3.fromRGB(150, 150, 160)
-		lblTitle.TextSize = 12
-		lblTitle.Font = Enum.Font.GothamBold
-		lblTitle.TextXAlignment = Enum.TextXAlignment.Left
-		lblTitle.Parent = frame
 		
-		local pad = Instance.new("UIPadding")
-		pad.PaddingLeft = UDim.new(0, 10)
-		pad.Parent = lblTitle
-
-		local lblVal = Instance.new("TextLabel")
-		lblVal.Size = UDim2.new(0.6, 0, 1, 0)
-		lblVal.Position = UDim2.new(0.4, 0, 0, 0)
-		lblVal.BackgroundTransparency = 1
-		lblVal.Text = tostring(value)
-		lblVal.TextColor3 = Color3.fromRGB(220, 220, 230)
-		lblVal.TextSize = 12
-		lblVal.Font = Enum.Font.Gotham
-		lblVal.TextXAlignment = Enum.TextXAlignment.Left
-		lblVal.Parent = frame
-		
-		return lblVal
+		-- Smooth scroll to bottom
+		LogBox.CanvasPosition = Vector2.new(0, LogBox.AbsoluteCanvasSize.Y)
 	end
 
-	local valPlaceName = makeInfoLabel("Place Name:", placeName)
-	local valPlaceId = makeInfoLabel("Place ID:", placeId)
-	local valGameId = makeInfoLabel("Game ID:", gameId)
-	
-	local valSyncStatus = makeInfoLabel("Sync Status:", "Idle")
-	local valLastSync = makeInfoLabel("Last Synced:", "Never")
-
-	local ForceSyncBtn = Instance.new("TextButton")
-	ForceSyncBtn.Size = UDim2.new(1, 0, 0, 40)
-	ForceSyncBtn.BackgroundColor3 = Color3.fromRGB(0, 180, 120)
-	ForceSyncBtn.Text = "🔄 Force Git Sync Now"
-	ForceSyncBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-	ForceSyncBtn.Font = Enum.Font.GothamBold
-	ForceSyncBtn.TextSize = 14
-	ForceSyncBtn.Parent = SyncList
-
-	local ForceSyncCorner = Instance.new("UICorner")
-	ForceSyncCorner.CornerRadius = UDim.new(0, 6)
-	ForceSyncCorner.Parent = ForceSyncBtn
-
-	-- 3. Settings Tab Panel
-	local SettingsPanel = Instance.new("Frame")
-	SettingsPanel.Size = UDim2.new(1, 0, 1, 0)
-	SettingsPanel.BackgroundTransparency = 1
-	SettingsPanel.Visible = false
-	SettingsPanel.Parent = ContentFrame
-
-	local SettingsList = Instance.new("Frame")
-	SettingsList.Size = UDim2.new(1, -20, 1, -20)
-	SettingsList.Position = UDim2.new(0, 10, 0, 10)
-	SettingsList.BackgroundTransparency = 1
-	SettingsList.Parent = SettingsPanel
-
-	local SettingsLayout = Instance.new("UIListLayout")
-	SettingsLayout.Padding = UDim.new(0, 12)
-	SettingsLayout.Parent = SettingsList
-
-	local function makeInputBlock(title, placeholder, defaultValue, isPassword)
-		local lbl = Instance.new("TextLabel")
-		lbl.Size = UDim2.new(1, 0, 0, 15)
-		lbl.BackgroundTransparency = 1
-		lbl.Text = title
-		lbl.TextColor3 = Color3.fromRGB(180, 180, 190)
-		lbl.TextSize = 12
-		lbl.Font = Enum.Font.GothamBold
-		lbl.TextXAlignment = Enum.TextXAlignment.Left
-		lbl.Parent = SettingsList
-
-		local tb = Instance.new("TextBox")
-		tb.Size = UDim2.new(1, 0, 0, 35)
-		tb.BackgroundColor3 = Color3.fromRGB(28, 28, 35)
-		tb.PlaceholderText = placeholder
-		tb.Text = defaultValue
-		tb.TextColor3 = Color3.fromRGB(240, 240, 250)
-		tb.TextSize = 12
-		tb.Font = Enum.Font.Gotham
-		tb.ClearTextOnFocus = false
-		if isPassword then
-			-- Simplified hidden display
-			if defaultValue ~= "" then
-				tb.PlaceholderText = "••••••••••••••••"
-				tb.Text = defaultValue
-			end
-		end
-		tb.Parent = SettingsList
-
-		local corner = Instance.new("UICorner")
-		corner.CornerRadius = UDim.new(0, 6)
-		corner.Parent = tb
-
-		local pad = Instance.new("UIPadding")
-		pad.PaddingLeft = UDim.new(0, 8)
-		pad.Parent = tb
-
-		return tb
+	local function sendPrompt()
+		local text = ChatInput.Text
+		if text == "" then return end
+		ChatInput.Text = ""
+		SyncEvent:FireServer("SendChat", text)
 	end
 
-	local apiKeyInput = makeInputBlock("Gemini API Key:", "AI API key (gemini-2.5-flash)...", config.API_Key, true)
-	local githubUrlInput = makeInputBlock("GitHub Raw Code URL:", "https://raw.githubusercontent.com/...", config.GitHub_URL, false)
-
-	-- Sync Toggle
-	local SyncToggleBtn = Instance.new("TextButton")
-	SyncToggleBtn.Size = UDim2.new(1, 0, 0, 40)
-	SyncToggleBtn.BackgroundColor3 = config.Sync_Enabled and Color3.fromRGB(0, 150, 255) or Color3.fromRGB(60, 60, 70)
-	SyncToggleBtn.Text = config.Sync_Enabled and "Auto-Sync: ENABLED" or "Auto-Sync: DISABLED"
-	SyncToggleBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-	SyncToggleBtn.Font = Enum.Font.GothamBold
-	SyncToggleBtn.TextSize = 13
-	SyncToggleBtn.Parent = SettingsList
-
-	local SyncToggleCorner = Instance.new("UICorner")
-	SyncToggleCorner.CornerRadius = UDim.new(0, 6)
-	SyncToggleCorner.Parent = SyncToggleBtn
-
-	local SaveBtn = Instance.new("TextButton")
-	SaveBtn.Size = UDim2.new(1, 0, 0, 40)
-	SaveBtn.BackgroundColor3 = Color3.fromRGB(220, 160, 0)
-	SaveBtn.Text = "Save Config"
-	SaveBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-	SaveBtn.Font = Enum.Font.GothamBold
-	SaveBtn.TextSize = 14
-	SaveBtn.Parent = SettingsList
-
-	local SaveCorner = Instance.new("UICorner")
-	SaveCorner.CornerRadius = UDim.new(0, 6)
-	SaveCorner.Parent = SaveBtn
-
-	-- Event Connections
-	
-	-- Panel Show/Hide
-	ToggleBtn.Activated:Connect(function()
-		MainPanel.Visible = not MainPanel.Visible
+	SendBtn.Activated:Connect(sendPrompt)
+	ChatInput.FocusLost:Connect(function(enterPressed)
+		if enterPressed then sendPrompt() end
 	end)
 
-	-- Navigation Tabs
-	local function setTab(activeName)
-		ChatPanel.Visible = (activeName == "Chat")
-		SyncPanel.Visible = (activeName == "Sync")
-		SettingsPanel.Visible = (activeName == "Settings")
+	-- Settings save logic
+	local SaveBtn = SettingsPanel.SettingsList:WaitForChild("SaveBtn")
+	local apiKeyInput = SettingsPanel.SettingsList:WaitForChild("ApiKeyInput")
+	local githubUrlInput = SettingsPanel.SettingsList:WaitForChild("GithubUrlInput")
+	local SyncToggleBtn = SettingsPanel.SettingsList:WaitForChild("SyncToggleBtn")
 
-		ChatTabBtn.TextColor3 = Color3.fromRGB(150, 150, 160)
-		SyncTabBtn.TextColor3 = Color3.fromRGB(150, 150, 160)
-		SettingsTabBtn.TextColor3 = Color3.fromRGB(150, 150, 160)
+	SaveBtn.Activated:Connect(function()
+		apiConfig.API_Key = apiKeyInput.Text
+		apiConfig.GitHub_URL = githubUrlInput.Text
+		apiConfig.Custom_Model = customModelBox.Text
+		SyncEvent:FireServer("SaveConfig", apiConfig)
+	end)
 
-		if activeName == "Chat" then
-			ChatTabBtn.TextColor3 = Color3.fromRGB(240, 240, 250)
-			ActiveBar:TweenPosition(UDim2.new(0, 0, 1, -2), Enum.EasingDirection.Out, Enum.EasingStyle.Quart, 0.2, true)
-		elseif activeName == "Sync" then
-			SyncTabBtn.TextColor3 = Color3.fromRGB(240, 240, 250)
-			ActiveBar:TweenPosition(UDim2.new(0.33, 0, 1, -2), Enum.EasingDirection.Out, Enum.EasingStyle.Quart, 0.2, true)
-		elseif activeName == "Settings" then
-			SettingsTabBtn.TextColor3 = Color3.fromRGB(240, 240, 250)
-			ActiveBar:TweenPosition(UDim2.new(0.66, 0, 1, -2), Enum.EasingDirection.Out, Enum.EasingStyle.Quart, 0.2, true)
+	SyncToggleBtn.Activated:Connect(function()
+		apiConfig.Sync_Enabled = not apiConfig.Sync_Enabled
+		SyncEvent:FireServer("ToggleSync", apiConfig.Sync_Enabled)
+	end)
+
+	-- Force Sync
+	local ForceSyncBtn = SyncPanel:WaitForChild("SyncList"):WaitForChild("ForceSyncBtn")
+	ForceSyncBtn.Activated:Connect(function()
+		SyncEvent:FireServer("ForceSync")
+	end)
+
+	-- Server Sync Listener
+	SyncEvent.OnClientEvent:Connect(function(action, data, extra)
+		if action == "UpdateConfig" then
+			apiConfig = data
+			apiKeyInput.Text = apiConfig.API_Key
+			githubUrlInput.Text = apiConfig.GitHub_URL
+			customModelBox.Text = apiConfig.Custom_Model or ""
+			
+			SyncToggleBtn.BackgroundColor3 = apiConfig.Sync_Enabled and Color3.fromRGB(0, 150, 255) or Color3.fromRGB(60, 60, 70)
+			SyncToggleBtn.Text = apiConfig.Sync_Enabled and "Auto-Sync: ENABLED" or "Auto-Sync: DISABLED"
+			
+			updateModelSelectionUI(apiConfig.Model)
+		elseif action == "Log" then
+			appendLog(data, extra)
+		elseif action == "UpdateSyncStats" then
+			SyncPanel.SyncList.SyncStatusLabel.ValueLabel.Text = data.status
+			SyncPanel.SyncList.SyncStatusLabel.ValueLabel.TextColor3 = data.color
+			SyncPanel.SyncList.LastSyncLabel.ValueLabel.Text = data.lastSync
 		end
+	end)
+
+	-- Initialize tab layout
+	setTab("Chat")
+
+else
+	-- =========================================================================
+	-- SERVER-SIDE SYSTEM (HttpService, Gemini API client, GitHub Sync, DataStores)
+	-- =========================================================================
+	
+	local HttpService = game:GetService("HttpService")
+	local Players = game:GetService("Players")
+	local ReplicatedStorage = game:GetService("ReplicatedStorage")
+	local DataStoreService = game:GetService("DataStoreService")
+	local MarketplaceService = game:GetService("MarketplaceService")
+
+	-- Initial Config Setup
+	local config = {
+		API_Key = "",
+		GitHub_URL = "https://raw.githubusercontent.com/Baran3575/roblox-studio-lite-sync/main/src/main.lua",
+		Sync_Enabled = true,
+		Sync_Interval = 3,
+		Model = "gemini-3.5-flash",
+		Custom_Model = ""
+	}
+
+	-- DataStore Configuration Persistence
+	local configStore
+	pcall(function()
+		configStore = DataStoreService:GetDataStore("StudioLiteAIConfig_v3")
+		local saved = configStore:GetAsync("Config")
+		if saved then
+			for k, v do
+				config[k] = v
+			end
+		end
+	end)
+
+	local lastGitHubCode = ""
+	local lastSyncTime = "Never"
+
+	-- Create remote event for client-server sync bridge
+	local SyncEvent = ReplicatedStorage:FindFirstChild("StudioLiteSyncEvent")
+	if not SyncEvent then
+		SyncEvent = Instance.new("RemoteEvent")
+		SyncEvent.Name = "StudioLiteSyncEvent"
+		SyncEvent.Parent = ReplicatedStorage
 	end
 
-	ChatTabBtn.Activated:Connect(function() setTab("Chat") end)
-	SyncTabBtn.Activated:Connect(function() setTab("Sync") end)
-	SettingsTabBtn.Activated:Connect(function() setTab("Settings") end)
+	-- Clean markdown code blocks from Gemini outputs
+	local function cleanLuaCode(text)
+		text = text:gsub("^%s*```lua%s*", "")
+		text = text:gsub("^%s*```%s*", "")
+		text = text:gsub("%s*```%s*$", "")
+		return text
+	end
 
-	-- Chat Execution Logic
-	local processingChat = false
-	local function sendChatMsg()
-		local prompt = ChatInput.Text
-		if prompt == "" or processingChat then return end
-		processingChat = true
+	-- Retrieve Game Info
+	local placeId = game.PlaceId
+	local gameId = game.GameId
+	local placeName = "Local Studio Playtest"
+	pcall(function()
+		if placeId > 0 then
+			placeName = MarketplaceService:GetProductInfo(placeId).Name
+		end
+	end)
+
+	-- Talk to Gemini API
+	local function askGemini(prompt)
+		if not config.API_Key or config.API_Key == "" then
+			return false, "API Key is missing! Add it in Settings."
+		end
+
+		-- Resolve which model to use
+		local modelName = config.Model
+		if modelName == "custom" then
+			modelName = config.Custom_Model ~= "" and config.Custom_Model or "gemini-3.5-flash"
+		end
+
+		local url = "https://generativelanguage.googleapis.com/v1beta/models/" .. modelName .. ":generateContent?key=" .. config.API_Key
+		
+		local systemPrompt = [[
+You are an expert Roblox Lua developer. The user wants to write a script for their Roblox game.
+Generate ONLY the executable Lua code. Do not wrap the output in markdown code blocks like ```lua. Return the raw script text.
+Do not provide text explanations, only Lua code with comments if necessary.
+Make sure to use modern Roblox practices (e.g. task.wait, task.spawn) and directly interact with game/workspace.
+User Request: 
+]]
+
+		local payload = {
+			contents = {
+				{
+					parts = {
+						{ text = systemPrompt .. prompt }
+					}
+				}
+			}
+		}
+
+		local success, response = pcall(function()
+			return HttpService:PostAsync(
+				url,
+				HttpService:JSONEncode(payload),
+				Enum.HttpContentType.ApplicationJson
+			)
+		end)
+
+		if not success then
+			return false, "HTTP Error: " .. tostring(response)
+		end
+
+		local dataSuccess, decoded = pcall(function()
+			return HttpService:JSONDecode(response)
+		end)
+
+		if not dataSuccess or not decoded then
+			return false, "Failed to decode response."
+		end
+
+		local generatedText = decoded.candidates
+			and decoded.candidates[1]
+			and decoded.candidates[1].content
+			and decoded.candidates[1].content.parts
+			and decoded.candidates[1].content.parts[1]
+			and decoded.candidates[1].content.parts[1].text
+
+		if not generatedText then
+			return false, "Empty response from AI model."
+		end
+
+		return true, cleanLuaCode(generatedText)
+	end
+
+	-- Create static UI on server for replication
+	local function buildUI(player)
+		local ScreenGui = Instance.new("ScreenGui")
+		ScreenGui.Name = "StudioLiteSyncUI"
+		ScreenGui.ResetOnSpawn = false
+		ScreenGui.Parent = player:WaitForChild("PlayerGui")
+
+		-- Toggle Button
+		local ToggleBtn = Instance.new("TextButton")
+		ToggleBtn.Name = "ToggleBtn"
+		ToggleBtn.Size = UDim2.new(0, 50, 0, 50)
+		ToggleBtn.Position = UDim2.new(0.95, -50, 0.9, -50)
+		ToggleBtn.BackgroundColor3 = Color3.fromRGB(20, 20, 25)
+		ToggleBtn.BorderSizePixel = 0
+		ToggleBtn.Text = "⚡"
+		ToggleBtn.TextColor3 = Color3.fromRGB(0, 200, 255)
+		ToggleBtn.TextSize = 24
+		ToggleBtn.Parent = ScreenGui
+
+		local ToggleCorner = Instance.new("UICorner")
+		ToggleCorner.CornerRadius = UDim.new(0, 25)
+		ToggleCorner.Parent = ToggleBtn
+
+		local ToggleGlow = Instance.new("UIStroke")
+		ToggleGlow.Color = Color3.fromRGB(0, 150, 255)
+		ToggleGlow.Width = 2
+		ToggleGlow.Parent = ToggleBtn
+
+		-- Main Panel
+		local MainPanel = Instance.new("Frame")
+		MainPanel.Name = "MainPanel"
+		MainPanel.Size = UDim2.new(0, 440, 0, 520)
+		MainPanel.Position = UDim2.new(0.5, -220, 0.5, -260)
+		MainPanel.BackgroundColor3 = Color3.fromRGB(20, 20, 25)
+		MainPanel.BackgroundTransparency = 0.05
+		MainPanel.BorderSizePixel = 0
+		MainPanel.Visible = true
+		MainPanel.Parent = ScreenGui
+
+		local PanelCorner = Instance.new("UICorner")
+		PanelCorner.CornerRadius = UDim.new(0, 12)
+		PanelCorner.Parent = MainPanel
+
+		local PanelStroke = Instance.new("UIStroke")
+		PanelStroke.Color = Color3.fromRGB(45, 45, 55)
+		PanelStroke.Width = 1.5
+		PanelStroke.Parent = MainPanel
+
+		-- Title
+		local Title = Instance.new("TextLabel")
+		Title.Size = UDim2.new(1, 0, 0, 45)
+		Title.BackgroundTransparency = 1
+		Title.Text = " STUDIO LITE AI CO-PILOT  v2.2.0"
+		Title.TextColor3 = Color3.fromRGB(240, 240, 250)
+		Title.TextSize = 14
+		Title.Font = Enum.Font.GothamBold
+		Title.TextXAlignment = Enum.TextXAlignment.Left
+		Title.Parent = MainPanel
+
+		local TitlePadding = Instance.new("UIPadding")
+		TitlePadding.PaddingLeft = UDim.new(0, 15)
+		TitlePadding.Parent = Title
+
+		-- Tab Container
+		local TabContainer = Instance.new("Frame")
+		TabContainer.Name = "TabContainer"
+		TabContainer.Size = UDim2.new(1, 0, 0, 35)
+		TabContainer.Position = UDim2.new(0, 0, 0, 45)
+		TabContainer.BackgroundColor3 = Color3.fromRGB(15, 15, 18)
+		TabContainer.BorderSizePixel = 0
+		TabContainer.Parent = MainPanel
+
+		local function makeTabButton(name, text, posX)
+			local btn = Instance.new("TextButton")
+			btn.Name = name .. "TabBtn"
+			btn.Size = UDim2.new(0.25, 0, 1, 0)
+			btn.Position = UDim2.new(posX, 0, 0, 0)
+			btn.BackgroundTransparency = 1
+			btn.Text = text
+			btn.TextColor3 = Color3.fromRGB(140, 140, 150)
+			btn.TextSize = 11
+			btn.Font = Enum.Font.GothamSemibold
+			btn.Parent = TabContainer
+			return btn
+		end
+
+		local ChatTabBtn = makeTabButton("Chat", "💬 Chat", 0)
+		local SyncTabBtn = makeTabButton("Sync", "🔗 Sync", 0.25)
+		local SettingsTabBtn = makeTabButton("Settings", "⚙️ Config", 0.50)
+		local ChangelogTabBtn = makeTabButton("Changelog", "📜 Logs", 0.75)
+
+		-- Active Indicator Bar
+		local ActiveBar = Instance.new("Frame")
+		ActiveBar.Name = "ActiveBar"
+		ActiveBar.Size = UDim2.new(0.25, 0, 0, 2)
+		ActiveBar.Position = UDim2.new(0, 0, 1, -2)
+		ActiveBar.BackgroundColor3 = Color3.fromRGB(0, 200, 255)
+		ActiveBar.BorderSizePixel = 0
+		ActiveBar.Parent = TabContainer
+
+		-- Content Panel
+		local ContentFrame = Instance.new("Frame")
+		ContentFrame.Name = "ContentFrame"
+		ContentFrame.Size = UDim2.new(1, 0, 1, -80)
+		ContentFrame.Position = UDim2.new(0, 0, 0, 80)
+		ContentFrame.BackgroundTransparency = 1
+		ContentFrame.Parent = MainPanel
+
+		-- 1. Chat Tab Panel
+		local ChatPanel = Instance.new("Frame")
+		ChatPanel.Name = "ChatPanel"
+		ChatPanel.Size = UDim2.new(1, 0, 1, 0)
+		ChatPanel.BackgroundTransparency = 1
+		ChatPanel.Visible = true
+		ChatPanel.Parent = ContentFrame
+
+		local LogBox = Instance.new("ScrollingFrame")
+		LogBox.Name = "LogBox"
+		LogBox.Size = UDim2.new(1, -20, 1, -65)
+		LogBox.Position = UDim2.new(0, 10, 0, 10)
+		LogBox.BackgroundTransparency = 1
+		LogBox.CanvasSize = UDim2.new(0, 0, 0, 0)
+		LogBox.AutomaticCanvasSize = Enum.AutomaticCanvasSize.Y
+		LogBox.Parent = ChatPanel
+
+		local LogLayout = Instance.new("UIListLayout")
+		LogLayout.SortOrder = Enum.SortOrder.LayoutOrder
+		LogLayout.Padding = UDim.new(0, 8)
+		LogLayout.Parent = LogBox
+
+		local ChatInput = Instance.new("TextBox")
+		ChatInput.Name = "ChatInput"
+		ChatInput.Size = UDim2.new(1, -95, 0, 38)
+		ChatInput.Position = UDim2.new(0, 10, 1, -48)
+		ChatInput.BackgroundColor3 = Color3.fromRGB(28, 28, 35)
+		ChatInput.PlaceholderText = "Ask AI to generate and run code..."
 		ChatInput.Text = ""
+		ChatInput.TextColor3 = Color3.fromRGB(240, 240, 250)
+		ChatInput.TextSize = 13
+		ChatInput.Font = Enum.Font.Gotham
+		ChatInput.ClearTextOnFocus = false
+		ChatInput.Parent = ChatPanel
 
-		appendLog("You: " .. prompt, Color3.fromRGB(150, 220, 255))
-		appendLog("AI Co-pilot is writing code...", Color3.fromRGB(200, 180, 100))
+		local InputCorner = Instance.new("UICorner")
+		InputCorner.CornerRadius = UDim.new(0, 6)
+		InputCorner.Parent = ChatInput
+		
+		local InputPadding = Instance.new("UIPadding")
+		InputPadding.PaddingLeft = UDim.new(0, 8)
+		InputPadding.Parent = ChatInput
 
-		task.spawn(function()
-			local success, result = askGemini(prompt)
-			if success then
-				appendLog("Executing Code...", Color3.fromRGB(100, 220, 150))
-				
-				local runSuccess, runError = pcall(function()
-					local func = loadstring(result)
-					if func then
-						task.spawn(func)
-					else
-						error("Syntax error in generated Lua code.")
-					end
-				end)
+		local SendBtn = Instance.new("TextButton")
+		SendBtn.Name = "SendBtn"
+		SendBtn.Size = UDim2.new(0, 75, 0, 38)
+		SendBtn.Position = UDim2.new(1, -85, 1, -48)
+		SendBtn.BackgroundColor3 = Color3.fromRGB(0, 150, 255)
+		SendBtn.Text = "Send"
+		SendBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+		SendBtn.Font = Enum.Font.GothamBold
+		SendBtn.TextSize = 13
+		SendBtn.Parent = ChatPanel
 
-				if runSuccess then
-					appendLog("Code executed successfully!", Color3.fromRGB(0, 255, 120))
-				else
-					appendLog("Execution Error: " .. tostring(runError), Color3.fromRGB(255, 100, 100))
-				end
-			else
-				appendLog("AI Error: " .. result, Color3.fromRGB(255, 100, 100))
+		local SendCorner = Instance.new("UICorner")
+		SendCorner.CornerRadius = UDim.new(0, 6)
+		SendCorner.Parent = SendBtn
+
+		-- 2. Sync Tab Panel
+		local SyncPanel = Instance.new("Frame")
+		SyncPanel.Name = "SyncPanel"
+		SyncPanel.Size = UDim2.new(1, 0, 1, 0)
+		SyncPanel.BackgroundTransparency = 1
+		SyncPanel.Visible = false
+		SyncPanel.Parent = ContentFrame
+
+		local SyncList = Instance.new("Frame")
+		SyncList.Name = "SyncList"
+		SyncList.Size = UDim2.new(1, -20, 1, -20)
+		SyncList.Position = UDim2.new(0, 10, 0, 10)
+		SyncList.BackgroundTransparency = 1
+		SyncList.Parent = SyncPanel
+
+		local SyncLayout = Instance.new("UIListLayout")
+		SyncLayout.Padding = UDim.new(0, 10)
+		SyncLayout.Parent = SyncList
+
+		local function makeInfoLabel(name, title, value)
+			local frame = Instance.new("Frame")
+			frame.Name = name .. "Label"
+			frame.Size = UDim2.new(1, 0, 0, 40)
+			frame.BackgroundColor3 = Color3.fromRGB(28, 28, 35)
+			frame.BorderSizePixel = 0
+			frame.Parent = SyncList
+
+			local corner = Instance.new("UICorner")
+			corner.CornerRadius = UDim.new(0, 6)
+			corner.Parent = frame
+
+			local lblTitle = Instance.new("TextLabel")
+			lblTitle.Size = UDim2.new(0.4, 0, 1, 0)
+			lblTitle.BackgroundTransparency = 1
+			lblTitle.Text = title
+			lblTitle.TextColor3 = Color3.fromRGB(150, 150, 160)
+			lblTitle.TextSize = 12
+			lblTitle.Font = Enum.Font.GothamBold
+			lblTitle.TextXAlignment = Enum.TextXAlignment.Left
+			lblTitle.Parent = frame
+			
+			local pad = Instance.new("UIPadding")
+			pad.PaddingLeft = UDim.new(0, 10)
+			pad.Parent = lblTitle
+
+			local lblVal = Instance.new("TextLabel")
+			lblVal.Name = "ValueLabel"
+			lblVal.Size = UDim2.new(0.6, 0, 1, 0)
+			lblVal.Position = UDim2.new(0.4, 0, 0, 0)
+			lblVal.BackgroundTransparency = 1
+			lblVal.Text = tostring(value)
+			lblVal.TextColor3 = Color3.fromRGB(220, 220, 230)
+			lblVal.TextSize = 12
+			lblVal.Font = Enum.Font.Gotham
+			lblVal.TextXAlignment = Enum.TextXAlignment.Left
+			lblVal.Parent = frame
+			
+			return frame
+		end
+
+		makeInfoLabel("PlaceName", "Place Name:", placeName)
+		makeInfoLabel("PlaceId", "Place ID:", placeId)
+		makeInfoLabel("GameId", "Game ID:", gameId)
+		makeInfoLabel("SyncStatus", "Sync Status:", "Idle")
+		makeInfoLabel("LastSync", "Last Synced:", lastSyncTime)
+
+		local ForceSyncBtn = Instance.new("TextButton")
+		ForceSyncBtn.Name = "ForceSyncBtn"
+		ForceSyncBtn.Size = UDim2.new(1, 0, 0, 42)
+		ForceSyncBtn.BackgroundColor3 = Color3.fromRGB(0, 180, 120)
+		ForceSyncBtn.Text = "🔄 Force Git Sync Now"
+		ForceSyncBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+		ForceSyncBtn.Font = Enum.Font.GothamBold
+		ForceSyncBtn.TextSize = 14
+		ForceSyncBtn.Parent = SyncList
+
+		local ForceSyncCorner = Instance.new("UICorner")
+		ForceSyncCorner.CornerRadius = UDim.new(0, 6)
+		ForceSyncCorner.Parent = ForceSyncBtn
+
+		-- 3. Settings Tab Panel
+		local SettingsPanel = Instance.new("Frame")
+		SettingsPanel.Name = "SettingsPanel"
+		SettingsPanel.Size = UDim2.new(1, 0, 1, 0)
+		SettingsPanel.BackgroundTransparency = 1
+		SettingsPanel.Visible = false
+		SettingsPanel.Parent = ContentFrame
+
+		local SettingsList = Instance.new("Frame")
+		SettingsList.Name = "SettingsList"
+		SettingsList.Size = UDim2.new(1, -20, 1, -20)
+		SettingsList.Position = UDim2.new(0, 10, 0, 10)
+		SettingsList.BackgroundTransparency = 1
+		SettingsList.Parent = SettingsPanel
+
+		local SettingsLayout = Instance.new("UIListLayout")
+		SettingsLayout.Padding = UDim.new(0, 10)
+		SettingsLayout.Parent = SettingsList
+
+		local function makeInputBlock(name, title, placeholder, defaultValue)
+			local lbl = Instance.new("TextLabel")
+			lbl.Size = UDim2.new(1, 0, 0, 15)
+			lbl.BackgroundTransparency = 1
+			lbl.Text = title
+			lbl.TextColor3 = Color3.fromRGB(180, 180, 190)
+			lbl.TextSize = 12
+			lbl.Font = Enum.Font.GothamBold
+			lbl.TextXAlignment = Enum.TextXAlignment.Left
+			lbl.Parent = SettingsList
+
+			local tb = Instance.new("TextBox")
+			tb.Name = name
+			tb.Size = UDim2.new(1, 0, 0, 32)
+			tb.BackgroundColor3 = Color3.fromRGB(28, 28, 35)
+			tb.PlaceholderText = placeholder
+			tb.Text = defaultValue
+			tb.TextColor3 = Color3.fromRGB(240, 240, 250)
+			tb.TextSize = 12
+			tb.Font = Enum.Font.Gotham
+			tb.ClearTextOnFocus = false
+			tb.Parent = SettingsList
+
+			local corner = Instance.new("UICorner")
+			corner.CornerRadius = UDim.new(0, 6)
+			corner.Parent = tb
+
+			local pad = Instance.new("UIPadding")
+			pad.PaddingLeft = UDim.new(0, 8)
+			pad.Parent = tb
+
+			return tb
+		end
+
+		makeInputBlock("ApiKeyInput", "Google Gemini API Key:", "AI API key...", config.API_Key)
+		makeInputBlock("GithubUrlInput", "GitHub Raw Code URL:", "https://raw.githubusercontent.com/...", config.GitHub_URL)
+
+		-- Model Selection Grid Title
+		local modelLbl = Instance.new("TextLabel")
+		modelLbl.Size = UDim2.new(1, 0, 0, 15)
+		modelLbl.BackgroundTransparency = 1
+		modelLbl.Text = "Gemini Model Provider:"
+		modelLbl.TextColor3 = Color3.fromRGB(180, 180, 190)
+		modelLbl.TextSize = 12
+		modelLbl.Font = Enum.Font.GothamBold
+		modelLbl.TextXAlignment = Enum.TextXAlignment.Left
+		modelLbl.Parent = SettingsList
+
+		-- Model Selection Grid Frame
+		local ModelGrid = Instance.new("Frame")
+		ModelGrid.Name = "ModelGrid"
+		ModelGrid.Size = UDim2.new(1, 0, 0, 72)
+		ModelGrid.BackgroundTransparency = 1
+		ModelGrid.Parent = SettingsList
+
+		local gridLayout = Instance.new("UIGridLayout")
+		gridLayout.CellSize = UDim2.new(0.31, 0, 0, 32)
+		gridLayout.CellSpacing = UDim2.new(0.035, 0, 0, 8)
+		gridLayout.Parent = ModelGrid
+
+		local function makeModelSelectBtn(modelId, displayName)
+			local btn = Instance.new("TextButton")
+			btn.Name = modelId
+			btn.Text = displayName
+			btn.TextColor3 = Color3.fromRGB(180, 180, 190)
+			btn.BackgroundColor3 = Color3.fromRGB(35, 35, 45)
+			btn.Font = Enum.Font.GothamBold
+			btn.TextSize = 11
+			btn.Parent = ModelGrid
+			
+			local corner = Instance.new("UICorner")
+			corner.CornerRadius = UDim.new(0, 6)
+			corner.Parent = btn
+		end
+
+		makeModelSelectBtn("gemini-3.5-flash", "3.5 Flash")
+		makeModelSelectBtn("gemini-3.5-pro", "3.5 Pro")
+		makeModelSelectBtn("gemini-3.1-flash", "3.1 Flash")
+		makeModelSelectBtn("gemini-3.1-pro", "3.1 Pro")
+		makeModelSelectBtn("gemini-3.0-flash", "3.0 Flash")
+		makeModelSelectBtn("custom", "✏️ Custom")
+
+		-- Custom Model Input Box
+		local customModelInput = Instance.new("TextBox")
+		customModelInput.Name = "CustomModelInput"
+		customModelInput.Size = UDim2.new(1, 0, 0, 32)
+		customModelInput.BackgroundColor3 = Color3.fromRGB(28, 28, 35)
+		customModelInput.PlaceholderText = "e.g., gemini-flash-latest"
+		customModelInput.Text = config.Custom_Model or ""
+		customModelInput.TextColor3 = Color3.fromRGB(240, 240, 250)
+		customModelInput.TextSize = 12
+		customModelInput.Font = Enum.Font.Gotham
+		customModelInput.ClearTextOnFocus = false
+		customModelInput.Visible = false
+		customModelInput.Parent = SettingsList
+
+		local customCorner = Instance.new("UICorner")
+		customCorner.CornerRadius = UDim.new(0, 6)
+		customCorner.Parent = customModelInput
+		
+		local customPad = Instance.new("UIPadding")
+		customPad.PaddingLeft = UDim.new(0, 8)
+		customPad.Parent = customModelInput
+
+		-- Auto Sync Toggle Button
+		local SyncToggleBtn = Instance.new("TextButton")
+		SyncToggleBtn.Name = "SyncToggleBtn"
+		SyncToggleBtn.Size = UDim2.new(1, 0, 0, 35)
+		SyncToggleBtn.BackgroundColor3 = Color3.fromRGB(0, 150, 255)
+		SyncToggleBtn.Text = "Auto-Sync: ENABLED"
+		SyncToggleBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+		SyncToggleBtn.Font = Enum.Font.GothamBold
+		SyncToggleBtn.TextSize = 13
+		SyncToggleBtn.Parent = SettingsList
+
+		local SyncToggleCorner = Instance.new("UICorner")
+		SyncToggleCorner.CornerRadius = UDim.new(0, 6)
+		SyncToggleCorner.Parent = SyncToggleBtn
+
+		-- Save Button
+		local SaveBtn = Instance.new("TextButton")
+		SaveBtn.Name = "SaveBtn"
+		SaveBtn.Size = UDim2.new(1, 0, 0, 35)
+		SaveBtn.BackgroundColor3 = Color3.fromRGB(220, 150, 0)
+		SaveBtn.Text = "Save Config"
+		SaveBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+		SaveBtn.Font = Enum.Font.GothamBold
+		SaveBtn.TextSize = 13
+		SaveBtn.Parent = SettingsList
+
+		local SaveCorner = Instance.new("UICorner")
+		SaveCorner.CornerRadius = UDim.new(0, 6)
+		SaveCorner.Parent = SaveBtn
+
+		-- 4. Changelog Tab Panel
+		local ChangelogPanel = Instance.new("Frame")
+		ChangelogPanel.Name = "ChangelogPanel"
+		ChangelogPanel.Size = UDim2.new(1, 0, 1, 0)
+		ChangelogPanel.BackgroundTransparency = 1
+		ChangelogPanel.Visible = false
+		ChangelogPanel.Parent = ContentFrame
+
+		local ChangelogScroll = Instance.new("ScrollingFrame")
+		ChangelogScroll.Size = UDim2.new(1, -20, 1, -20)
+		ChangelogScroll.Position = UDim2.new(0, 10, 0, 10)
+		ChangelogScroll.BackgroundTransparency = 1
+		ChangelogScroll.CanvasSize = UDim2.new(0, 0, 0, 0)
+		ChangelogScroll.AutomaticCanvasSize = Enum.AutomaticCanvasSize.Y
+		ChangelogScroll.Parent = ChangelogPanel
+
+		local ChangelogLayout = Instance.new("UIListLayout")
+		ChangelogLayout.Padding = UDim.new(0, 12)
+		ChangelogLayout.Parent = ChangelogScroll
+
+		local function makeChangelogEntry(versionStr, changesList)
+			local frame = Instance.new("Frame")
+			frame.Size = UDim2.new(1, 0, 0, 0)
+			frame.AutomaticSize = Enum.AutomaticSize.Y
+			frame.BackgroundColor3 = Color3.fromRGB(28, 28, 35)
+			frame.BorderSizePixel = 0
+			frame.Parent = ChangelogScroll
+
+			local corner = Instance.new("UICorner")
+			corner.CornerRadius = UDim.new(0, 6)
+			corner.Parent = frame
+
+			local vlbl = Instance.new("TextLabel")
+			vlbl.Size = UDim2.new(1, -10, 0, 20)
+			vlbl.Position = UDim2.new(0, 10, 0, 5)
+			vlbl.BackgroundTransparency = 1
+			vlbl.Text = versionStr
+			vlbl.TextColor3 = Color3.fromRGB(0, 200, 255)
+			vlbl.TextSize = 13
+			vlbl.Font = Enum.Font.GothamBold
+			vlbl.TextXAlignment = Enum.TextXAlignment.Left
+			vlbl.Parent = frame
+
+			local changesStr = ""
+			for _, item in ipairs(changesList) do
+				changesStr = changesStr .. "• " .. item .. "\n"
 			end
-			processingChat = false
+
+			local textlbl = Instance.new("TextLabel")
+			textlbl.Size = UDim2.new(1, -20, 0, 0)
+			textlbl.Position = UDim2.new(0, 10, 0, 28)
+			textlbl.AutomaticSize = Enum.AutomaticSize.Y
+			textlbl.BackgroundTransparency = 1
+			textlbl.Text = changesStr
+			textlbl.TextColor3 = Color3.fromRGB(200, 200, 210)
+			textlbl.TextSize = 11
+			textlbl.Font = Enum.Font.Gotham
+			textlbl.TextXAlignment = Enum.TextXAlignment.Left
+			textlbl.TextWrapped = true
+			textlbl.Parent = frame
+			
+			local pad = Instance.new("UIPadding")
+			pad.PaddingBottom = UDim.new(0, 8)
+			pad.Parent = frame
+		end
+
+		makeChangelogEntry("v2.2.0 - Client/Server Architecture", {
+			"Split server logic and client Tweens completely.",
+			"Added responsive animated hover and tactile press states.",
+			"Created animated opening and closing transitions.",
+			"Added Google Gemini 3.0 / 3.1 / 3.5 models selection.",
+			"Added custom model text input support."
+		})
+		makeChangelogEntry("v2.1.0 - Interactive AI & Memory", {
+			"Created floating dark-mode UI overlay panel.",
+			"Added in-game Gemini AI code generator console.",
+			"Added persistence layer saving API keys using DataStores."
+		})
+		makeChangelogEntry("v1.0.0 - Basic Sync Client", {
+			"Implemented basic background GitHub polling sync."
+		})
+
+		-- Inject Client-Side Controller (Cloning this script)
+		local clientScript = script:Clone()
+		clientScript.Enabled = false
+		clientScript.Name = "ClientController"
+		clientScript.RunContext = Enum.RunContext.Client
+		clientScript.Parent = ScreenGui
+		clientScript.Enabled = true
+
+		-- Send Initial Configuration
+		task.defer(function()
+			SyncEvent:FireClient(player, "UpdateConfig", config)
+			SyncEvent:FireClient(player, "UpdateSyncStats", {
+				status = config.Sync_Enabled and "Syncing..." or "Disabled",
+				color = config.Sync_Enabled and Color3.fromRGB(0, 255, 120) or Color3.fromRGB(255, 80, 80),
+				lastSync = lastSyncTime
+			})
 		end)
 	end
 
-	SendBtn.Activated:Connect(sendChatMsg)
-	ChatInput.FocusLost:Connect(function(enterPressed)
-		if enterPressed then sendChatMsg() end
-	end)
-
-	-- Settings Toggle Auto-Sync
-	SyncToggleBtn.Activated:Connect(function()
-		config.Sync_Enabled = not config.Sync_Enabled
-		saveConfig()
-		SyncToggleBtn.BackgroundColor3 = config.Sync_Enabled and Color3.fromRGB(0, 150, 255) or Color3.fromRGB(60, 60, 70)
-		SyncToggleBtn.Text = config.Sync_Enabled and "Auto-Sync: ENABLED" or "Auto-Sync: DISABLED"
-	end)
-
-	-- Save Configuration
-	SaveBtn.Activated:Connect(function()
-		config.API_Key = apiKeyInput.Text
-		config.GitHub_URL = githubUrlInput.Text
-		saveConfig()
-		appendLog("Settings updated and saved!", Color3.fromRGB(100, 255, 100))
-	end)
-
-	-- Global loop updater hook for showing states on UI
-	task.spawn(function()
-		while ScreenGui.Parent do
-			valSyncStatus.Text = config.Sync_Enabled and "Syncing..." or "Disabled"
-			valSyncStatus.TextColor3 = config.Sync_Enabled and Color3.fromRGB(0, 255, 120) or Color3.fromRGB(200, 80, 80)
-			
-			if lastGitHubCode ~= "" then
-				valLastSync.Text = os.date("%H:%M:%S")
-			end
-			task.wait(1)
-		end
-	end)
-
-	-- Initial Welcome Msg
-	appendLog("Welcome to Studio Lite Co-Pilot!", Color3.fromRGB(0, 200, 255))
-	if not config.API_Key or config.API_Key == "" then
-		appendLog("⚠️ Please go to Settings tab and set your Gemini API Key.", Color3.fromRGB(255, 150, 0))
-	else
-		appendLog("System ready! Ask me anything.", Color3.fromRGB(100, 255, 150))
+	-- Bind to Player Joins
+	Players.PlayerAdded:Connect(buildUI)
+	for _, p in ipairs(Players:GetPlayers()) do
+		buildUI(p)
 	end
-end
 
--- Initialize UI on Player Join
-Players.PlayerAdded:Connect(createUI)
-for _, p in ipairs(Players:GetPlayers()) do
-	createUI(p)
-end
+	-- Send Log Updates to All Clients
+	local function logToClients(msg, color)
+		SyncEvent:FireAllClients("Log", msg, color)
+	end
 
--- GitHub Auto-Sync Loop
-task.spawn(function()
-	print("[Sync] GitHub Auto-Sync background service initialized.")
-	while true do
-		if config.Sync_Enabled and config.GitHub_URL and config.GitHub_URL ~= "" then
-			local success, response = pcall(function()
-				return HttpService:GetAsync(config.GitHub_URL .. "?t=" .. tostring(os.time()))
+	-- Network Message Listener
+	SyncEvent.OnServerEvent:Connect(function(player, action, data)
+		if action == "SaveConfig" then
+			config.API_Key = data.API_Key
+			config.GitHub_URL = data.GitHub_URL
+			config.Model = data.Model
+			config.Custom_Model = data.Custom_Model
+			
+			-- Save configurations securely
+			pcall(function()
+				if configStore then
+					configStore:SetAsync("Config", config)
+				end
 			end)
+			
+			logToClients("[System] Settings configuration updated.", Color3.fromRGB(240, 200, 50))
+			SyncEvent:FireAllClients("UpdateConfig", config)
+		elseif action == "ToggleSync" then
+			config.Sync_Enabled = data
+			pcall(function()
+				if configStore then
+					configStore:SetAsync("Config", config)
+				end
+			end)
+			
+			logToClients("[System] Auto-Sync toggled: " .. (config.Sync_Enabled and "ENABLED" or "DISABLED"), Color3.fromRGB(240, 200, 50))
+			SyncEvent:FireAllClients("UpdateSyncStats", {
+				status = config.Sync_Enabled and "Syncing..." or "Disabled",
+				color = config.Sync_Enabled and Color3.fromRGB(0, 255, 120) or Color3.fromRGB(255, 80, 80),
+				lastSync = lastSyncTime
+			})
+		elseif action == "SendChat" then
+			logToClients(player.Name .. ": " .. data, Color3.fromRGB(150, 220, 255))
+			logToClients("AI Co-pilot: Generating Lua script...", Color3.fromRGB(200, 180, 100))
 
-			if success and response then
-				if response ~= lastGitHubCode then
-					lastGitHubCode = response
-					print("[Sync] New code fetched from GitHub! Executing...")
-
+			task.spawn(function()
+				local success, result = askGemini(data)
+				if success then
+					logToClients("AI Co-pilot: Executing code...", Color3.fromRGB(100, 220, 150))
+					
 					local runSuccess, runError = pcall(function()
-						local func = loadstring(response)
+						local func = loadstring(result)
 						if func then
 							task.spawn(func)
 						else
-							error("Syntax error in downloaded GitHub script.")
+							error("Syntax error in generated Lua code.")
 						end
 					end)
 
-					if not runSuccess then
-						warn("[Sync] Error running GitHub code: " .. tostring(runError))
+					if runSuccess then
+						logToClients("AI Co-pilot: Code executed successfully!", Color3.fromRGB(0, 255, 120))
 					else
-						print("[Sync] GitHub code executed successfully!")
+						logToClients("Execution Error: " .. tostring(runError), Color3.fromRGB(255, 100, 100))
 					end
+				else
+					logToClients("AI Error: " .. result, Color3.fromRGB(255, 100, 100))
 				end
-			else
-				warn("[Sync] GitHub Fetch Error: " .. tostring(response))
-			end
+			end)
+		elseif action == "ForceSync" then
+			logToClients("[System] Force git sync triggered.", Color3.fromRGB(0, 200, 255))
+			lastGitHubCode = "" -- Reset to force download
 		end
-		task.wait(config.Sync_Interval)
-	end
-end)
+	end)
+
+	-- GitHub Auto-Sync Loop
+	task.spawn(function()
+		while true do
+			if config.Sync_Enabled and config.GitHub_URL and config.GitHub_URL ~= "" then
+				local success, response = pcall(function()
+					return HttpService:GetAsync(config.GitHub_URL .. "?t=" .. tostring(os.time()))
+				end)
+
+				if success and response then
+					if response ~= lastGitHubCode then
+						lastGitHubCode = response
+						lastSyncTime = os.date("%H:%M:%S")
+						
+						logToClients("[Sync] New code fetched from GitHub! Running...", Color3.fromRGB(130, 80, 255))
+
+						local runSuccess, runError = pcall(function()
+							local func = loadstring(response)
+							if func then
+								task.spawn(func)
+							else
+								error("Syntax error in downloaded GitHub script.")
+							end
+						end)
+
+						if not runSuccess then
+							logToClients("[Sync Error] Failed execution: " .. tostring(runError), Color3.fromRGB(255, 80, 80))
+						else
+							logToClients("[Sync Success] GitHub code ran successfully!", Color3.fromRGB(0, 255, 120))
+						end
+						
+						SyncEvent:FireAllClients("UpdateSyncStats", {
+							status = "Synced",
+							color = Color3.fromRGB(0, 255, 120),
+							lastSync = lastSyncTime
+						})
+					end
+				else
+					SyncEvent:FireAllClients("UpdateSyncStats", {
+						status = "Fetch Error",
+						color = Color3.fromRGB(255, 80, 80),
+						lastSync = lastSyncTime
+					})
+				end
+			end
+			task.wait(config.Sync_Interval)
+		end
+	end)
+end
