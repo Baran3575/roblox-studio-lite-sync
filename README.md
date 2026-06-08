@@ -1,4 +1,4 @@
-# Roblox Studio Lite Co-Pilot & Sync System (MCP + GitHub) — v2.3.0
+# Roblox Studio Lite Co-Pilot & Sync System (MCP + GitHub) — v2.4.0
 
 This project turns your Roblox Studio Lite (mobile studio or PC Studio) into an interactive AI-assisted game development environment. It combines **GitHub Auto-Sync** and **In-game Gemini AI Co-pilot Chat** with advanced vector-drawn UI animations.
 
@@ -12,12 +12,11 @@ This project turns your Roblox Studio Lite (mobile studio or PC Studio) into an 
 
 ### 2. Supported Google Gemini Models
 Easily select the model provider in the Settings grid:
-*   **Gemini 2.5 Flash** (Default, very fast and accurate)
-*   **Gemini 2.5 Pro** (Excellent reasoning for complex coding)
-*   **Gemini 2.0 Flash**
-*   **Gemini 2.0 Pro**
-*   **Gemini 1.5 Flash**
-*   **Custom Model**: Provide a custom model override text name (e.g., `gemini-1.5-pro-latest` or experimental models).
+*   **Gemini 3.5 Flash** (Default, very fast and accurate)
+*   **Gemini 3.1 Flash Lite**
+*   **Gemini 3 Flash**
+*   **Gemini 3 Flash Preview**
+*   **Custom Model**: Provide a custom model override text name (e.g., `gemini-3.5-pro-exp` or custom endpoints).
 
 ### 3. Dynamic GitHub Sync
 *   Write code in `src/main.lua` of this repository, commit/push, and the script instantly runs in your active Roblox game playtest without restarts.
@@ -59,7 +58,7 @@ To allow communication between Roblox, Gemini, and GitHub, you must enable these
 1. When you join, click the **⚡ button** in the bottom-right corner.
 2. Navigate to the **Config (⚙️)** tab.
 3. Paste your Google Gemini API key (Get a free one at [Google AI Studio](https://aistudio.google.com/)).
-4. Select one of the **Gemini 2.5/2.0/1.5** models or select **Custom** and type a specific model ID.
+4. Select one of the **Gemini 3.5 / 3.1 / 3** models or select **Custom** and type a specific model ID.
 5. Click **Save Config**.
 
 ### 2. Auto-Sync Setup

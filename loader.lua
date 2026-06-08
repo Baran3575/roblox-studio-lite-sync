@@ -1,5 +1,5 @@
 --[[
-	Studio Lite AI Co-Pilot & GitHub Sync Loader — v2.3.0
+	Studio Lite AI Co-Pilot & GitHub Sync Loader — v2.4.0
 	Place this inside a Script in ServerScriptService.
 	Make sure HttpService and LoadstringEnabled are active!
 	
@@ -44,7 +44,7 @@ if RunService:IsClient() then
 		API_Key = "",
 		GitHub_URL = "",
 		Sync_Enabled = true,
-		Model = "gemini-2.5-flash",
+		Model = "gemini-3.5-flash",
 		Custom_Model = ""
 	}
 
@@ -284,20 +284,20 @@ else
 	local DataStoreService = game:GetService("DataStoreService")
 	local MarketplaceService = game:GetService("MarketplaceService")
 
-	-- Initial Config Setup
+	-- Initial Config Setup (Uses Gemini 3.5 Flash by default)
 	local config = {
 		API_Key = "",
 		GitHub_URL = "https://raw.githubusercontent.com/Baran3575/roblox-studio-lite-sync/main/src/main.lua",
 		Sync_Enabled = true,
 		Sync_Interval = 3,
-		Model = "gemini-2.5-flash",
+		Model = "gemini-3.5-flash",
 		Custom_Model = ""
 	}
 
 	-- DataStore Configuration Persistence
 	local configStore
 	pcall(function()
-		configStore = DataStoreService:GetDataStore("StudioLiteAIConfig_v4")
+		configStore = DataStoreService:GetDataStore("StudioLiteAIConfig_v5")
 		local saved = configStore:GetAsync("Config")
 		if saved then
 			for k, v in pairs(saved) do
@@ -342,7 +342,7 @@ else
 
 		local modelName = config.Model
 		if modelName == "custom" then
-			modelName = config.Custom_Model ~= "" and config.Custom_Model or "gemini-2.5-flash"
+			modelName = config.Custom_Model ~= "" and config.Custom_Model or "gemini-3.5-flash"
 		end
 
 		local url = "https://generativelanguage.googleapis.com/v1beta/models/" .. modelName .. ":generateContent?key=" .. config.API_Key
@@ -629,7 +629,7 @@ User Request:
 		ToggleBtn.Position = UDim2.new(0.95, -50, 0.9, -50)
 		ToggleBtn.BackgroundColor3 = Color3.fromRGB(20, 20, 25)
 		ToggleBtn.BorderSizePixel = 0
-		ToggleBtn.Text = "" -- No text, using vector bolt icon
+		ToggleBtn.Text = "" 
 		ToggleBtn.Parent = ScreenGui
 
 		local ToggleCorner = Instance.new("UICorner")
@@ -668,7 +668,7 @@ User Request:
 		Title.Size = UDim2.new(1, -40, 0, 45)
 		Title.Position = UDim2.new(0, 40, 0, 0)
 		Title.BackgroundTransparency = 1
-		Title.Text = "Studio Lite Co-Pilot  v2.3.0"
+		Title.Text = "Studio Lite Co-Pilot  v2.4.0"
 		Title.TextColor3 = Color3.fromRGB(240, 240, 250)
 		Title.TextSize = 14
 		Title.Font = Enum.Font.GothamBold
@@ -955,19 +955,18 @@ User Request:
 			corner.Parent = btn
 		end
 
-		-- Valid Gemini Production Models
-		makeModelSelectBtn("gemini-2.5-flash", "2.5 Flash")
-		makeModelSelectBtn("gemini-2.5-pro", "2.5 Pro")
-		makeModelSelectBtn("gemini-2.0-flash", "2.0 Flash")
-		makeModelSelectBtn("gemini-2.0-pro", "2.0 Pro")
-		makeModelSelectBtn("gemini-1.5-flash", "1.5 Flash")
+		-- Valid Gemini 3.x Models Selection Grid
+		makeModelSelectBtn("gemini-3.5-flash", "3.5 Flash")
+		makeModelSelectBtn("gemini-3.1-flash-lite", "3.1 Lite")
+		makeModelSelectBtn("gemini-3-flash", "3 Flash")
+		makeModelSelectBtn("gemini-3-flash-preview", "3 Preview")
 		makeModelSelectBtn("custom", "✏️ Custom")
 
 		local customModelInput = Instance.new("TextBox")
 		customModelInput.Name = "CustomModelInput"
 		customModelInput.Size = UDim2.new(1, 0, 0, 32)
 		customModelInput.BackgroundColor3 = Color3.fromRGB(28, 28, 35)
-		customModelInput.PlaceholderText = "e.g., gemini-1.5-pro-latest"
+		customModelInput.PlaceholderText = "e.g., gemini-3.5-pro-exp"
 		customModelInput.Text = config.Custom_Model or ""
 		customModelInput.TextColor3 = Color3.fromRGB(240, 240, 250)
 		customModelInput.TextSize = 12
@@ -1080,11 +1079,15 @@ User Request:
 			pad.Parent = frame
 		end
 
+		makeChangelogEntry("v2.4.0 - Corrected 3.x Models", {
+			"Removed 1.0, 1.5, 2.0, 2.5 API versions completely.",
+			"Added Gemini 3.5 Flash, 3.1 Flash Lite, 3 Flash, and 3 Flash Preview.",
+			"Maintained vector Lua graphics and sleek dark UI."
+		})
 		makeChangelogEntry("v2.3.0 - Vector Graphics & Production Models", {
 			"Removed emojis and replaced them with crisp programmatic Lua vector designs.",
 			"Implemented an official vector-drawn Lua orbit logo.",
-			"Created vector-drawn tab icons (bubble, links, gear, doc) and lightning bolt toggle.",
-			"Corrected the default model list to valid Gemini API models (2.5/2.0/1.5 Flash & Pro)."
+			"Created vector-drawn tab icons (bubble, links, gear, doc) and lightning bolt toggle."
 		})
 		makeChangelogEntry("v2.2.0 - Client/Server Architecture", {
 			"Split server logic and client Tweens completely.",
