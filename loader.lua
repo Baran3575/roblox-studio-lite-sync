@@ -297,7 +297,7 @@ else
 	-- DataStore Configuration Persistence
 	local configStore
 	pcall(function()
-		configStore = DataStoreService:GetDataStore("StudioLiteAIConfig_v5")
+		configStore = DataStoreService:GetDataStore("StudioLiteAIConfig_v6")
 		local saved = configStore:GetAsync("Config")
 		if saved then
 			for k, v in pairs(saved) do
@@ -316,14 +316,6 @@ else
 		SyncEvent.Parent = ReplicatedStorage
 	end
 
-	-- Clean markdown code blocks from Gemini outputs
-	local function cleanLuaCode(text)
-		text = text:gsub("^%s*```lua%s*", "")
-		text = text:gsub("^%s*```%s*", "")
-		text = text:gsub("%s*```%s*$", "")
-		return text
-	end
-
 	-- Retrieve Game Info
 	local placeId = game.PlaceId
 	local gameId = game.GameId
@@ -334,7 +326,219 @@ else
 		end
 	end)
 
-	-- Talk to Gemini API
+	-- Helper: Find Instance by slash-separated path
+	local function findInstanceByPath(path)
+		if not path or path == "" or path == "game" then return game end
+		local parts = string.split(path, "/")
+		local current = game
+		for _, partName in ipairs(parts) do
+			if partName ~= "" and partName ~= "game" then
+				local nextObj = current:FindFirstChild(partName)
+				if not nextObj then
+					return nil
+				end
+				current = nextObj
+			end
+		end
+		return current
+	end
+
+	-- Helper: Safely set properties, handling Roblox-specific types
+	local function setPropertySafe(instance, name, value)
+		local success, err = pcall(function()
+			if name == "Position" or name == "Size" or name == "Scale" then
+				if type(value) == "table" and #value == 3 then
+					value = Vector3.new(value[1], value[2], value[3])
+				end
+			elseif name == "Color" or name == "Color3" then
+				if type(value) == "table" and #value == 3 then
+					local r = value[1] > 1 and value[1]/255 or value[1]
+					local g = value[2] > 1 and value[2]/255 or value[2]
+					local b = value[3] > 1 and value[3]/255 or value[3]
+					value = Color3.new(r, g, b)
+				end
+			elseif name == "BrickColor" then
+				if type(value) == "string" then
+					value = BrickColor.new(value)
+				end
+			elseif name == "Material" then
+				if type(value) == "string" then
+					value = Enum.Material[value]
+				end
+			end
+			instance[name] = value
+		end)
+		return success, err
+	end
+
+	-- AI Tools Declarations
+	local geminiTools = {
+		{
+			function_declarations = {
+				{
+					name = "create_instance",
+					description = "Creates a new Roblox Instance (Part, Folder, Model, etc.) and sets its properties. Path example: 'Workspace' or 'Workspace/MyFolder'.",
+					parameters = {
+						type = "OBJECT",
+						properties = {
+							className = { type = "STRING", description = "The class type to create (e.g., Part, Folder, Model, WedgePart)." },
+							name = { type = "STRING", description = "The name of the new instance." },
+							parentPath = { type = "STRING", description = "The path of the parent object. Defaults to 'Workspace'." },
+							properties = { type = "STRING", description = "JSON string of properties to set (e.g. '{\"Anchored\": true, \"Size\": [4,2,4], \"Material\": \"Neon\"}')." }
+						},
+						required = { "className", "name" }
+					}
+				},
+				{
+					name = "delete_instance",
+					description = "Deletes/destroys any Roblox Instance at the specified path.",
+					parameters = {
+						type = "OBJECT",
+						properties = {
+							path = { type = "STRING", description = "The full path to the instance to delete (e.g., 'Workspace/TempPart')." }
+						},
+						required = { "path" }
+					}
+				},
+				{
+					name = "write_script",
+					description = "Runs code dynamically on the server and stores it in a script container. Helps compile scripts.",
+					parameters = {
+						type = "OBJECT",
+						properties = {
+							path = { type = "STRING", description = "Full path to place the script container (e.g., 'ServerScriptService/AIScript')." },
+							source = { type = "STRING", description = "The complete Roblox Lua code to execute." }
+						},
+						required = { "path", "source" }
+					}
+				},
+				{
+					name = "list_directory",
+					description = "Lists all children of an object at a given path to understand the workspace structure.",
+					parameters = {
+						type = "OBJECT",
+						properties = {
+							path = { type = "STRING", description = "Path to inspect (e.g., 'Workspace')." }
+						},
+						required = { "path" }
+					}
+				}
+			}
+		}
+	}
+
+	-- AI Tool Executor
+	local function executeTool(name, args)
+		if name == "create_instance" then
+			local className = args.className
+			local objName = args.name
+			local parentPath = args.parentPath or "Workspace"
+			local propertiesStr = args.properties
+
+			local parent = findInstanceByPath(parentPath)
+			if not parent then
+				return "Error: Parent path not found: " .. parentPath
+			end
+
+			local success, obj = pcall(function()
+				return Instance.new(className)
+			end)
+			if not success or not obj then
+				return "Error: Invalid class type: " .. tostring(className)
+			end
+
+			obj.Name = objName
+			obj.Parent = parent
+
+			if propertiesStr and propertiesStr ~= "" then
+				local propSuccess, decodedProps = pcall(function()
+					return HttpService:JSONDecode(propertiesStr)
+				end)
+				if propSuccess and type(decodedProps) == "table" then
+					for propName, propValue in pairs(decodedProps) do
+						setPropertySafe(obj, propName, propValue)
+					end
+				end
+			end
+
+			return "Successfully created " .. className .. " named '" .. objName .. "' inside " .. parentPath
+		elseif name == "delete_instance" then
+			local path = args.path
+			local obj = findInstanceByPath(path)
+			if not obj then
+				return "Error: Instance not found at path: " .. path
+			end
+			if obj == workspace or obj == game then
+				return "Error: Cannot delete critical game root objects."
+			end
+			obj:Destroy()
+			return "Successfully deleted instance at path: " .. path
+		elseif name == "write_script" then
+			local path = args.path
+			local source = args.source
+
+			-- Parse parent path and script name
+			local pathParts = string.split(path, "/")
+			local scriptName = table.remove(pathParts, #pathParts)
+			local parentPath = table.concat(pathParts, "/")
+			
+			local parent = findInstanceByPath(parentPath)
+			if not parent then
+				return "Error: Script parent path not found: " .. parentPath
+			end
+
+			-- Because Roblox doesn't support setting Script.Source at runtime,
+			-- we save the code in a StringValue container to make it readable, and execute it.
+			local container = parent:FindFirstChild(scriptName) or Instance.new("Folder")
+			container.Name = scriptName
+			container.Parent = parent
+
+			local codeValue = container:FindFirstChild("SourceCode") or Instance.new("StringValue")
+			codeValue.Name = "SourceCode"
+			codeValue.Value = source
+			codeValue.Parent = container
+
+			-- Run immediately
+			local runSuccess, runError = pcall(function()
+				local func = loadstring(source)
+				if func then
+					task.spawn(func)
+				else
+					error("Syntax error in script source.")
+				end
+			end)
+
+			if runSuccess then
+				return "Successfully created script '" .. scriptName .. "' and executed it."
+			else
+				return "Script created but failed to run: " .. tostring(runError)
+			end
+		elseif name == "list_directory" then
+			local path = args.path
+			local obj = findInstanceByPath(path)
+			if not obj then
+				return "Error: Path not found: " .. path
+			end
+
+			local children = obj:GetChildren()
+			local list = {}
+			for _, child in ipairs(children) do
+				table.insert(list, child.Name .. " (" .. child.ClassName .. ")")
+			end
+			return "Children of " .. path .. ": " .. table.concat(list, ", ")
+		end
+		return "Error: Tool name not recognized."
+	end
+
+	-- Clean markdown code blocks from Gemini outputs
+	local function cleanLuaCode(text)
+		text = text:gsub("^%s*```lua%s*", "")
+		text = text:gsub("^%s*```%s*", "")
+		text = text:gsub("%s*```%s*$", "")
+		return text
+	end
+
+	-- Talk to Gemini API (Supports multi-turn tool cycles)
 	local function askGemini(prompt)
 		if not config.API_Key or config.API_Key == "" then
 			return false, "API Key is missing! Add it in Settings."
@@ -346,25 +550,27 @@ else
 		end
 
 		local url = "https://generativelanguage.googleapis.com/v1beta/models/" .. modelName .. ":generateContent?key=" .. config.API_Key
-		
+
 		local systemPrompt = [[
-You are an expert Roblox Lua developer. The user wants to write a script for their Roblox game.
-Generate ONLY the executable Lua code. Do not wrap the output in markdown code blocks like ```lua. Return the raw script text.
-Do not provide text explanations, only Lua code with comments if necessary.
-Make sure to use modern Roblox practices (e.g. task.wait, task.spawn) and directly interact with game/workspace.
-User Request: 
+You are an expert Roblox Lua assistant with tool access to modify the game.
+Always use the tools provided to create, delete, list, or write scripts instead of just outputting markdown code blocks when the user wants actions.
+If no tool fits the request, output raw Lua code.
 ]]
 
-		local payload = {
-			contents = {
-				{
-					parts = {
-						{ text = systemPrompt .. prompt }
-					}
-				}
+		-- Build initial conversation turn
+		local history = {
+			{
+				role = "user",
+				parts = { { text = systemPrompt .. "\nUser Request: " .. prompt } }
 			}
 		}
 
+		local payload = {
+			contents = history,
+			tools = geminiTools
+		}
+
+		-- API Turn 1
 		local success, response = pcall(function()
 			return HttpService:PostAsync(
 				url,
@@ -374,7 +580,7 @@ User Request:
 		end)
 
 		if not success then
-			return false, "HTTP Error: " .. tostring(response)
+			return false, "HTTP API Error: " .. tostring(response)
 		end
 
 		local dataSuccess, decoded = pcall(function()
@@ -382,21 +588,90 @@ User Request:
 		end)
 
 		if not dataSuccess or not decoded then
-			return false, "Failed to decode response."
+			return false, "Failed to parse JSON response."
 		end
 
-		local generatedText = decoded.contents
-			and decoded.contents[1]
-			and decoded.contents[1].parts
-			and decoded.contents[1].parts[1]
-			and decoded.contents[1].parts[1].text
-			or (decoded.candidates and decoded.candidates[1] and decoded.candidates[1].content and decoded.candidates[1].content.parts and decoded.candidates[1].content.parts[1] and decoded.candidates[1].content.parts[1].text)
+		local candidate = decoded.candidates and decoded.candidates[1]
+		local content = candidate and candidate.content
+		local parts = content and content.parts
 
-		if not generatedText then
-			return false, "Empty response from AI model."
+		if not parts then
+			return false, "No response content from model."
 		end
 
-		return true, cleanLuaCode(generatedText)
+		-- Parse response for function calls
+		local functionCalls = {}
+		local textResponse = ""
+
+		for _, part in ipairs(parts) do
+			if part.functionCall then
+				table.insert(functionCalls, part.functionCall)
+			elseif part.text then
+				textResponse = textResponse .. part.text
+			end
+		end
+
+		-- If Gemini wants to execute tool calls
+		if #functionCalls > 0 then
+			local toolResponses = {}
+			for _, call in ipairs(functionCalls) do
+				local execResult = executeTool(call.name, call.args)
+				table.insert(toolResponses, {
+					functionResponse = {
+						name = call.name,
+						response = {
+							output = execResult
+						}
+					}
+				})
+			end
+
+			-- Append model's turn (with functionCalls) to history
+			table.insert(history, {
+				role = "model",
+				parts = parts
+			})
+
+			-- Append tool's execution responses to history
+			table.insert(history, {
+				role = "tool",
+				parts = toolResponses
+			})
+
+			-- API Turn 2 (Send back execution outputs to get final verbal summary)
+			local nextPayload = {
+				contents = history,
+				tools = geminiTools
+			}
+
+			local nextSuccess, nextResponse = pcall(function()
+				return HttpService:PostAsync(
+					url,
+					HttpService:JSONEncode(nextPayload),
+					Enum.HttpContentType.ApplicationJson
+				)
+			end)
+
+			if not nextSuccess then
+				return true, "[Tool Loop Success] Actions executed successfully, but final summary failed."
+			end
+
+			local nextDataSuccess, nextDecoded = pcall(function()
+				return HttpService:JSONDecode(nextResponse)
+			end)
+
+			if nextDataSuccess and nextDecoded then
+				local nextCandidate = nextDecoded.candidates and nextDecoded.candidates[1]
+				local nextContent = nextCandidate and nextCandidate.content
+				local nextParts = nextContent and nextContent.parts
+				if nextParts and nextParts[1] and nextParts[1].text then
+					return true, nextParts[1].text
+				end
+			end
+			return true, "[Tool Loop Success] Actions executed successfully."
+		else
+			return true, cleanLuaCode(textResponse)
+		end
 	end
 
 	-- Programmatic Vector Graphic Helpers
@@ -928,7 +1203,7 @@ User Request:
 		modelLbl.TextXAlignment = Enum.TextXAlignment.Left
 		modelLbl.Parent = SettingsList
 
-		-- Models Grid
+		-- Models Grid (2x2 Column layout)
 		local ModelGrid = Instance.new("Frame")
 		ModelGrid.Name = "ModelGrid"
 		ModelGrid.Size = UDim2.new(1, 0, 0, 72)
@@ -936,8 +1211,8 @@ User Request:
 		ModelGrid.Parent = SettingsList
 
 		local gridLayout = Instance.new("UIGridLayout")
-		gridLayout.CellSize = UDim2.new(0.31, 0, 0, 32)
-		gridLayout.CellSpacing = UDim2.new(0.035, 0, 0, 8)
+		gridLayout.CellSize = UDim2.new(0.47, 0, 0, 32)
+		gridLayout.CellSpacing = UDim2.new(0.06, 0, 0, 8)
 		gridLayout.Parent = ModelGrid
 
 		local function makeModelSelectBtn(modelId, displayName)
@@ -955,11 +1230,10 @@ User Request:
 			corner.Parent = btn
 		end
 
-		-- Valid Gemini 3.x Models Selection Grid
+		-- Valid Gemini 3.x Production Models (gemini-3-flash-preview deleted)
 		makeModelSelectBtn("gemini-3.5-flash", "3.5 Flash")
-		makeModelSelectBtn("gemini-3.1-flash-lite", "3.1 Lite")
+		makeModelSelectBtn("gemini-3.1-flash-lite", "3.1 Flash Lite")
 		makeModelSelectBtn("gemini-3-flash", "3 Flash")
-		makeModelSelectBtn("gemini-3-flash-preview", "3 Preview")
 		makeModelSelectBtn("custom", "✏️ Custom")
 
 		local customModelInput = Instance.new("TextBox")
@@ -1079,12 +1353,14 @@ User Request:
 			pad.Parent = frame
 		end
 
-		makeChangelogEntry("v2.4.0 - Corrected 3.x Models", {
-			"Removed 1.0, 1.5, 2.0, 2.5 API versions completely.",
-			"Added Gemini 3.5 Flash, 3.1 Flash Lite, 3 Flash, and 3 Flash Preview.",
-			"Maintained vector Lua graphics and sleek dark UI."
+		makeChangelogEntry("v2.4.0 - AI Tool Support (MCP) & 3.x Models", {
+			"Removed 1.x and 2.x models completely.",
+			"Added Gemini 3.5 Flash, 3.1 Flash Lite, and 3 Flash.",
+			"Implemented full Gemini tool integration / function calling.",
+			"Added create_instance, delete_instance, write_script, and list_directory tools.",
+			"Added automatic multi-turn AI tool execution loop."
 		})
-		makeChangelogEntry("v2.3.0 - Vector Graphics & Production Models", {
+		makeChangelogEntry("v2.3.0 - Vector Graphics", {
 			"Removed emojis and replaced them with crisp programmatic Lua vector designs.",
 			"Implemented an official vector-drawn Lua orbit logo.",
 			"Created vector-drawn tab icons (bubble, links, gear, doc) and lightning bolt toggle."
@@ -1093,11 +1369,6 @@ User Request:
 			"Split server logic and client Tweens completely.",
 			"Added responsive animated hover and tactile press states.",
 			"Created animated opening and closing transitions."
-		})
-		makeChangelogEntry("v2.1.0 - Interactive AI & Memory", {
-			"Created floating dark-mode UI overlay panel.",
-			"Added in-game Gemini AI code generator console.",
-			"Added persistence layer saving API keys using DataStores."
 		})
 		makeChangelogEntry("v1.0.0 - Basic Sync Client", {
 			"Implemented basic background GitHub polling sync."
@@ -1165,27 +1436,12 @@ User Request:
 			})
 		elseif action == "SendChat" then
 			logToClients(player.Name .. ": " .. data, Color3.fromRGB(150, 220, 255))
-			logToClients("AI Co-pilot: Generating Lua script...", Color3.fromRGB(200, 180, 100))
+			logToClients("AI Co-pilot: Analyzing request...", Color3.fromRGB(200, 180, 100))
 
 			task.spawn(function()
 				local success, result = askGemini(data)
 				if success then
-					logToClients("AI Co-pilot: Executing code...", Color3.fromRGB(100, 220, 150))
-					
-					local runSuccess, runError = pcall(function()
-						local func = loadstring(result)
-						if func then
-							task.spawn(func)
-						else
-							error("Syntax error in generated Lua code.")
-						end
-					end)
-
-					if runSuccess then
-						logToClients("AI Co-pilot: Code executed successfully!", Color3.fromRGB(0, 255, 120))
-					else
-						logToClients("Execution Error: " .. tostring(runError), Color3.fromRGB(255, 100, 100))
-					end
+					logToClients("AI Co-pilot: " .. result, Color3.fromRGB(0, 255, 120))
 				else
 					logToClients("AI Error: " .. result, Color3.fromRGB(255, 100, 100))
 				end
