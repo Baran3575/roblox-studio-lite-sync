@@ -1,24 +1,48 @@
-# Roblox Studio Lite Sync System
+# Roblox Studio Lite Co-Pilot & Sync System (MCP + GitHub)
 
-This repository dynamically syncs Lua script updates written here directly to your Roblox Studio Lite game.
+This project turns your Roblox Studio Lite (mobile studio or PC Studio) into an interactive AI-assisted game development environment. It combines **GitHub Auto-Sync** and **In-game Gemini AI Co-pilot Chat**.
 
-## Configuration & Usage
+---
 
-### 1. Enable HttpService and Loadstring in Roblox Studio
-For this system to work, you must enable these settings in your Roblox game:
-*   **HttpService**: Run this command in your Roblox Studio command bar:
-    ```lua
-    game:GetService("HttpService").HttpEnabled = true
-    ```
-    *(Or turn on "Allow HTTP Requests" in Game Settings > Security)*
-*   **Loadstring**: Select `ServerScriptService` in the Explorer, and in the Properties window, make sure **`LoadstringEnabled`** is checked (`true`).
+## 🌟 Features
+1. **Dynamic GitHub Sync**: Write code in `src/main.lua` of this repository, commit/push, and the script instantly runs in your active Roblox game playtest without restarts.
+2. **AI Co-pilot Chat UI**: A floating dark-mode UI in Roblox where you can chat with Gemini, ask it to write code, and it runs the code in your workspace instantly!
+3. **DataStore Memory**: Your Gemini API Key and custom GitHub Raw URLs are saved using Roblox DataStore so they persist across game sessions.
 
-### 2. Add the Loader Script
-1. In Roblox Studio, add a new `Script` inside `ServerScriptService`.
-2. Paste the contents of `loader.lua` into this script.
-3. Start the game (Play Solo).
+---
 
-### 3. How to Update Code
-1. Edit the file `src/main.lua` in this folder.
-2. Commit and push the changes to GitHub.
-3. The loader inside Roblox Studio Lite will automatically detect the changes within 3 seconds, fetch the new code, and run it instantly without you having to restart the game!
+## 🛠️ Setup Instructions for Roblox Studio Lite
+
+### Step 1: Enable Necessary Security Settings
+To allow communication between Roblox, Gemini, and GitHub, you must enable these settings:
+*   **HttpService (Allow HTTP Requests)**: 
+    *   Open your game settings (Game Settings > Security).
+    *   Turn on **Allow HTTP Requests**.
+    *   *(Alternatively, run `game:GetService("HttpService").HttpEnabled = true` in the Roblox Command Bar).*
+*   **Loadstring (Execute Dynamic Code)**:
+    *   In the Explorer, click on **ServerScriptService**.
+    *   In the Properties window, check the box for **`LoadstringEnabled`** (`true`).
+
+### Step 2: Install the Loader Script
+1. In the Explorer, add a new **`Script`** inside **`ServerScriptService`**.
+2. Copy the entire contents of [loader.lua](file:///data/data/com.termux/files/home/roblox-studio-lite-sync/loader.lua) (from this repository) and paste it into the script.
+3. Start the game (Play/Test).
+
+---
+
+## 🚀 How to Use
+
+### 1. In-Game AI Co-Pilot (Chat)
+1. When you join the game, you will see a floating **⚡ button** in the bottom-right corner. Click it to open the panel.
+2. Go to the **Settings (⚙️)** tab:
+   *   Enter your **Gemini API Key**. (Get one for free at [Google AI Studio](https://aistudio.google.com/)).
+   *   *(Optional)* Enter your GitHub raw URL if you are using a different repository.
+   *   Click **Save Config**.
+3. Go back to the **AI Chat (💬)** tab:
+   *   Type a command (e.g., `"workspace'e 10 tane kırmızı dönen küre ekle"` or `"create a giant neon staircase in front of me"`).
+   *   Press Enter or click **Send**.
+   *   The Gemini AI will generate the Lua code, print a confirmation, and execute the code live in the game!
+
+### 2. GitHub Syncing
+*   Any code written in `src/main.lua` will be automatically executed in your Roblox game within 3 seconds of being pushed to the `main` branch of this repository.
+*   You can toggle auto-sync on/off in the **Settings** tab.
