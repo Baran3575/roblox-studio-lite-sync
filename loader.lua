@@ -1,10 +1,10 @@
 --[[
-	Studio Lite AI Co-Pilot & GitHub Sync Loader
+	Studio Lite AI Co-Pilot & GitHub Sync Loader — v2.3.0
 	Place this inside a Script in ServerScriptService.
 	Make sure HttpService and LoadstringEnabled are active!
 	
 	Design Read: Roblox in-game development utility UI, with a dark-tech neon-accented 
-	glassmorphic visual language, leaning toward dark mode container designs + rich micro-interactions.
+	glassmorphic visual language, using vector-drawn UI elements instead of emoji slop.
 --]]
 
 local RunService = game:GetService("RunService")
@@ -44,7 +44,7 @@ if RunService:IsClient() then
 		API_Key = "",
 		GitHub_URL = "",
 		Sync_Enabled = true,
-		Model = "gemini-3.5-flash",
+		Model = "gemini-2.5-flash",
 		Custom_Model = ""
 	}
 
@@ -81,10 +81,9 @@ if RunService:IsClient() then
 		end)
 	end
 
-	-- Apply tactile animations to main buttons
 	addTactileFeedback(ToggleBtn, Color3.fromRGB(20, 20, 25), Color3.fromRGB(30, 30, 40))
 	
-	-- Setup Panel Open/Close
+	-- Panel Open/Close
 	ToggleBtn.Activated:Connect(function()
 		panelOpen = not panelOpen
 		if panelOpen then
@@ -106,7 +105,7 @@ if RunService:IsClient() then
 		end
 	end)
 
-	-- Tab Handler
+	-- Tab Handler & Hover States for Tab Icons
 	local function setTab(tabName)
 		currentTab = tabName
 		ChatPanel.Visible = (tabName == "Chat")
@@ -123,11 +122,35 @@ if RunService:IsClient() then
 		}
 		tween(ActiveBar, fastInfo, {Position = positions[tabName]})
 		
-		-- Fade in active content
-		local activeFrame = ContentFrame:FindFirstChild(tabName .. "Panel")
-		if activeFrame then
-			activeFrame.Size = UDim2.new(1, 0, 0.95, 0)
-			activeFrame.GroupColor3 = Color3.fromRGB(255, 255, 255)
+		-- Update Text & Icon Colors
+		for _, name in ipairs({"Chat", "Sync", "Settings", "Changelog"}) do
+			local btn = TabContainer:FindFirstChild(name .. "TabBtn")
+			local icon = btn and btn:FindFirstChild("Icon")
+			if btn then
+				if name == tabName then
+					btn.TextColor3 = Color3.fromRGB(240, 240, 250)
+					if icon then
+						for _, desc in ipairs(icon:GetDescendants()) do
+							if desc:IsA("Frame") then
+								desc.BackgroundColor3 = Color3.fromRGB(240, 240, 250)
+							elseif desc:IsA("UIStroke") then
+								desc.Color = Color3.fromRGB(240, 240, 250)
+							end
+						end
+					end
+				else
+					btn.TextColor3 = Color3.fromRGB(130, 130, 140)
+					if icon then
+						for _, desc in ipairs(icon:GetDescendants()) do
+							if desc:IsA("Frame") then
+								desc.BackgroundColor3 = Color3.fromRGB(130, 130, 140)
+							elseif desc:IsA("UIStroke") then
+								desc.Color = Color3.fromRGB(130, 130, 140)
+							end
+						end
+					end
+				end
+			end
 		end
 	end
 
@@ -187,7 +210,6 @@ if RunService:IsClient() then
 		log.TextXAlignment = Enum.TextXAlignment.Left
 		log.Parent = LogBox
 		
-		-- Smooth scroll to bottom
 		LogBox.CanvasPosition = Vector2.new(0, LogBox.AbsoluteCanvasSize.Y)
 	end
 
@@ -268,17 +290,17 @@ else
 		GitHub_URL = "https://raw.githubusercontent.com/Baran3575/roblox-studio-lite-sync/main/src/main.lua",
 		Sync_Enabled = true,
 		Sync_Interval = 3,
-		Model = "gemini-3.5-flash",
+		Model = "gemini-2.5-flash",
 		Custom_Model = ""
 	}
 
 	-- DataStore Configuration Persistence
 	local configStore
 	pcall(function()
-		configStore = DataStoreService:GetDataStore("StudioLiteAIConfig_v3")
+		configStore = DataStoreService:GetDataStore("StudioLiteAIConfig_v4")
 		local saved = configStore:GetAsync("Config")
 		if saved then
-			for k, v do
+			for k, v in pairs(saved) do
 				config[k] = v
 			end
 		end
@@ -287,7 +309,6 @@ else
 	local lastGitHubCode = ""
 	local lastSyncTime = "Never"
 
-	-- Create remote event for client-server sync bridge
 	local SyncEvent = ReplicatedStorage:FindFirstChild("StudioLiteSyncEvent")
 	if not SyncEvent then
 		SyncEvent = Instance.new("RemoteEvent")
@@ -319,10 +340,9 @@ else
 			return false, "API Key is missing! Add it in Settings."
 		end
 
-		-- Resolve which model to use
 		local modelName = config.Model
 		if modelName == "custom" then
-			modelName = config.Custom_Model ~= "" and config.Custom_Model or "gemini-3.5-flash"
+			modelName = config.Custom_Model ~= "" and config.Custom_Model or "gemini-2.5-flash"
 		end
 
 		local url = "https://generativelanguage.googleapis.com/v1beta/models/" .. modelName .. ":generateContent?key=" .. config.API_Key
@@ -365,12 +385,12 @@ User Request:
 			return false, "Failed to decode response."
 		end
 
-		local generatedText = decoded.candidates
-			and decoded.candidates[1]
-			and decoded.candidates[1].content
-			and decoded.candidates[1].content.parts
-			and decoded.candidates[1].content.parts[1]
-			and decoded.candidates[1].content.parts[1].text
+		local generatedText = decoded.contents
+			and decoded.contents[1]
+			and decoded.contents[1].parts
+			and decoded.contents[1].parts[1]
+			and decoded.contents[1].parts[1].text
+			or (decoded.candidates and decoded.candidates[1] and decoded.candidates[1].content and decoded.candidates[1].content.parts and decoded.candidates[1].content.parts[1] and decoded.candidates[1].content.parts[1].text)
 
 		if not generatedText then
 			return false, "Empty response from AI model."
@@ -379,7 +399,223 @@ User Request:
 		return true, cleanLuaCode(generatedText)
 	end
 
-	-- Create static UI on server for replication
+	-- Programmatic Vector Graphic Helpers
+	
+	-- Draw Lua Logo (Official style)
+	local function drawLuaLogo(parent, size, pos)
+		local logo = Instance.new("Frame")
+		logo.Name = "LuaLogo"
+		logo.Size = size
+		logo.Position = pos
+		logo.BackgroundTransparency = 1
+		logo.Parent = parent
+
+		-- Earth Circle (Dark Blue Orbit Path)
+		local orbit = Instance.new("Frame")
+		orbit.Size = UDim2.new(0.85, 0, 0.85, 0)
+		orbit.Position = UDim2.new(0.075, 0, 0.075, 0)
+		orbit.BackgroundColor3 = Color3.fromRGB(0, 0, 128)
+		orbit.BackgroundTransparency = 1
+		orbit.Parent = logo
+		
+		local orbitCorner = Instance.new("UICorner")
+		orbitCorner.CornerRadius = UDim.new(0.5, 0)
+		orbitCorner.Parent = orbit
+		
+		local stroke = Instance.new("UIStroke")
+		stroke.Color = Color3.fromRGB(80, 110, 190)
+		stroke.Width = 1.5
+		stroke.Parent = orbit
+
+		-- Main Planet Circle (Cyan-Blue Gradient)
+		local planet = Instance.new("Frame")
+		planet.Size = UDim2.new(0.64, 0, 0.64, 0)
+		planet.Position = UDim2.new(0.18, 0, 0.18, 0)
+		planet.BackgroundColor3 = Color3.fromRGB(0, 100, 220)
+		planet.BorderSizePixel = 0
+		planet.Parent = logo
+		
+		local planetCorner = Instance.new("UICorner")
+		planetCorner.CornerRadius = UDim.new(0.5, 0)
+		planetCorner.Parent = planet
+
+		-- Satellite Moon
+		local moon = Instance.new("Frame")
+		moon.Size = UDim2.new(0.2, 0, 0.2, 0)
+		moon.Position = UDim2.new(0.72, 0, 0.08, 0)
+		moon.BackgroundColor3 = Color3.fromRGB(240, 240, 250)
+		moon.BorderSizePixel = 0
+		moon.Parent = logo
+		
+		local moonCorner = Instance.new("UICorner")
+		moonCorner.CornerRadius = UDim.new(0.5, 0)
+		moonCorner.Parent = moon
+
+		-- Text label
+		local text = Instance.new("TextLabel")
+		text.Size = UDim2.new(1, 0, 1, 0)
+		text.BackgroundTransparency = 1
+		text.Text = "Lua"
+		text.TextColor3 = Color3.fromRGB(255, 255, 255)
+		text.TextSize = 10
+		text.Font = Enum.Font.GothamBold
+		text.Parent = planet
+	end
+
+	-- Draw Lightning Bolt for Toggle (Vector representation of ⚡)
+	local function drawLightningBolt(parent)
+		local iconFrame = Instance.new("Frame")
+		iconFrame.Name = "LightningIcon"
+		iconFrame.Size = UDim2.new(0, 16, 0, 24)
+		iconFrame.Position = UDim2.new(0.5, -8, 0.5, -12)
+		iconFrame.BackgroundTransparency = 1
+		iconFrame.Parent = parent
+
+		-- Top Part
+		local top = Instance.new("Frame")
+		top.Size = UDim2.new(0.6, 0, 0.5, 0)
+		top.Position = UDim2.new(0.3, 0, 0, 0)
+		top.BackgroundColor3 = Color3.fromRGB(0, 200, 255)
+		top.BorderSizePixel = 0
+		top.Rotation = -15
+		top.Parent = iconFrame
+
+		-- Bottom Part
+		local bottom = Instance.new("Frame")
+		bottom.Size = UDim2.new(0.5, 0, 0.55, 0)
+		bottom.Position = UDim2.new(0.1, 0, 0.45, 0)
+		bottom.BackgroundColor3 = Color3.fromRGB(0, 200, 255)
+		bottom.BorderSizePixel = 0
+		bottom.Rotation = -15
+		bottom.Parent = iconFrame
+	end
+
+	-- Vector Chat speech bubble
+	local function drawChatIcon(parent)
+		local icon = Instance.new("Frame")
+		icon.Name = "Icon"
+		icon.Size = UDim2.new(0, 15, 0, 12)
+		icon.Position = UDim2.new(0.1, 0, 0.5, -6)
+		icon.BackgroundColor3 = Color3.fromRGB(130, 130, 140)
+		icon.BorderSizePixel = 0
+		icon.Parent = parent
+		
+		local corner = Instance.new("UICorner")
+		corner.CornerRadius = UDim.new(0, 3)
+		corner.Parent = icon
+		
+		local tail = Instance.new("Frame")
+		tail.Size = UDim2.new(0, 5, 0, 5)
+		tail.Position = UDim2.new(0.15, 0, 0.7, 0)
+		tail.Rotation = 45
+		tail.BackgroundColor3 = Color3.fromRGB(130, 130, 140)
+		tail.BorderSizePixel = 0
+		tail.Parent = icon
+	end
+
+	-- Vector Sync overlapping link circles
+	local function drawSyncIcon(parent)
+		local icon = Instance.new("Frame")
+		icon.Name = "Icon"
+		icon.Size = UDim2.new(0, 14, 0, 14)
+		icon.Position = UDim2.new(0.1, 0, 0.5, -7)
+		icon.BackgroundTransparency = 1
+		icon.Parent = parent
+
+		local r1 = Instance.new("Frame")
+		r1.Size = UDim2.new(0.65, 0, 0.65, 0)
+		r1.BackgroundTransparency = 1
+		r1.Parent = icon
+		
+		local c1 = Instance.new("UICorner")
+		c1.CornerRadius = UDim.new(0.5, 0)
+		c1.Parent = r1
+		
+		local s1 = Instance.new("UIStroke")
+		s1.Color = Color3.fromRGB(130, 130, 140)
+		s1.Width = 1.5
+		s1.Parent = r1
+
+		local r2 = Instance.new("Frame")
+		r2.Size = UDim2.new(0.65, 0, 0.65, 0)
+		r2.Position = UDim2.new(0.35, 0, 0.35, 0)
+		r2.BackgroundTransparency = 1
+		r2.Parent = icon
+		
+		local c2 = Instance.new("UICorner")
+		c2.CornerRadius = UDim.new(0.5, 0)
+		c2.Parent = r2
+		
+		local s2 = Instance.new("UIStroke")
+		s2.Color = Color3.fromRGB(130, 130, 140)
+		s2.Width = 1.5
+		s2.Parent = r2
+	end
+
+	-- Vector Settings Gear Wheel
+	local function drawSettingsIcon(parent)
+		local icon = Instance.new("Frame")
+		icon.Name = "Icon"
+		icon.Size = UDim2.new(0, 14, 0, 14)
+		icon.Position = UDim2.new(0.1, 0, 0.5, -7)
+		icon.BackgroundTransparency = 1
+		icon.Parent = parent
+
+		local body = Instance.new("Frame")
+		body.Size = UDim2.new(0.7, 0, 0.7, 0)
+		body.Position = UDim2.new(0.15, 0, 0.15, 0)
+		body.BackgroundTransparency = 1
+		body.Parent = icon
+		
+		local c = Instance.new("UICorner")
+		c.CornerRadius = UDim.new(0.5, 0)
+		c.Parent = body
+		
+		local s = Instance.new("UIStroke")
+		s.Color = Color3.fromRGB(130, 130, 140)
+		s.Width = 2
+		s.Parent = body
+
+		for i = 1, 4 do
+			local bar = Instance.new("Frame")
+			bar.Size = UDim2.new(0.18, 0, 1, 0)
+			bar.Position = UDim2.new(0.41, 0, 0, 0)
+			bar.BackgroundColor3 = Color3.fromRGB(130, 130, 140)
+			bar.BorderSizePixel = 0
+			bar.Rotation = (i - 1) * 45
+			bar.Parent = icon
+		end
+	end
+
+	-- Vector Document Changelog Icon
+	local function drawLogsIcon(parent)
+		local icon = Instance.new("Frame")
+		icon.Name = "Icon"
+		icon.Size = UDim2.new(0, 12, 0, 14)
+		icon.Position = UDim2.new(0.12, 0, 0.5, -7)
+		icon.BackgroundTransparency = 1
+		icon.Parent = parent
+
+		local stroke = Instance.new("UIStroke")
+		stroke.Color = Color3.fromRGB(130, 130, 140)
+		stroke.Width = 1.5
+		stroke.Parent = icon
+
+		local corner = Instance.new("UICorner")
+		corner.CornerRadius = UDim.new(0, 2)
+		corner.Parent = icon
+
+		for i = 1, 3 do
+			local line = Instance.new("Frame")
+			line.Size = UDim2.new(0.6, 0, 0, 1)
+			line.Position = UDim2.new(0.2, 0, 0.25 * i + 0.1, 0)
+			line.BackgroundColor3 = Color3.fromRGB(130, 130, 140)
+			line.BorderSizePixel = 0
+			line.Parent = icon
+		end
+	end
+
+	-- Static UI builder runs on Server
 	local function buildUI(player)
 		local ScreenGui = Instance.new("ScreenGui")
 		ScreenGui.Name = "StudioLiteSyncUI"
@@ -393,9 +629,7 @@ User Request:
 		ToggleBtn.Position = UDim2.new(0.95, -50, 0.9, -50)
 		ToggleBtn.BackgroundColor3 = Color3.fromRGB(20, 20, 25)
 		ToggleBtn.BorderSizePixel = 0
-		ToggleBtn.Text = "⚡"
-		ToggleBtn.TextColor3 = Color3.fromRGB(0, 200, 255)
-		ToggleBtn.TextSize = 24
+		ToggleBtn.Text = "" -- No text, using vector bolt icon
 		ToggleBtn.Parent = ScreenGui
 
 		local ToggleCorner = Instance.new("UICorner")
@@ -406,6 +640,8 @@ User Request:
 		ToggleGlow.Color = Color3.fromRGB(0, 150, 255)
 		ToggleGlow.Width = 2
 		ToggleGlow.Parent = ToggleBtn
+
+		drawLightningBolt(ToggleBtn)
 
 		-- Main Panel
 		local MainPanel = Instance.new("Frame")
@@ -429,18 +665,17 @@ User Request:
 
 		-- Title
 		local Title = Instance.new("TextLabel")
-		Title.Size = UDim2.new(1, 0, 0, 45)
+		Title.Size = UDim2.new(1, -40, 0, 45)
+		Title.Position = UDim2.new(0, 40, 0, 0)
 		Title.BackgroundTransparency = 1
-		Title.Text = " STUDIO LITE AI CO-PILOT  v2.2.0"
+		Title.Text = "Studio Lite Co-Pilot  v2.3.0"
 		Title.TextColor3 = Color3.fromRGB(240, 240, 250)
 		Title.TextSize = 14
 		Title.Font = Enum.Font.GothamBold
 		Title.TextXAlignment = Enum.TextXAlignment.Left
 		Title.Parent = MainPanel
-
-		local TitlePadding = Instance.new("UIPadding")
-		TitlePadding.PaddingLeft = UDim.new(0, 15)
-		TitlePadding.Parent = Title
+		
+		drawLuaLogo(MainPanel, UDim2.new(0, 24, 0, 24), UDim2.new(0, 12, 0, 10))
 
 		-- Tab Container
 		local TabContainer = Instance.new("Frame")
@@ -451,24 +686,26 @@ User Request:
 		TabContainer.BorderSizePixel = 0
 		TabContainer.Parent = MainPanel
 
-		local function makeTabButton(name, text, posX)
+		local function makeTabButton(name, text, posX, drawIconCallback)
 			local btn = Instance.new("TextButton")
 			btn.Name = name .. "TabBtn"
 			btn.Size = UDim2.new(0.25, 0, 1, 0)
 			btn.Position = UDim2.new(posX, 0, 0, 0)
 			btn.BackgroundTransparency = 1
 			btn.Text = text
-			btn.TextColor3 = Color3.fromRGB(140, 140, 150)
+			btn.TextColor3 = Color3.fromRGB(130, 130, 140)
 			btn.TextSize = 11
 			btn.Font = Enum.Font.GothamSemibold
 			btn.Parent = TabContainer
+			
+			drawIconCallback(btn)
 			return btn
 		end
 
-		local ChatTabBtn = makeTabButton("Chat", "💬 Chat", 0)
-		local SyncTabBtn = makeTabButton("Sync", "🔗 Sync", 0.25)
-		local SettingsTabBtn = makeTabButton("Settings", "⚙️ Config", 0.50)
-		local ChangelogTabBtn = makeTabButton("Changelog", "📜 Logs", 0.75)
+		local ChatTabBtn = makeTabButton("Chat", "      Chat", 0, drawChatIcon)
+		local SyncTabBtn = makeTabButton("Sync", "      Sync", 0.25, drawSyncIcon)
+		local SettingsTabBtn = makeTabButton("Settings", "      Config", 0.50, drawSettingsIcon)
+		local ChangelogTabBtn = makeTabButton("Changelog", "      Logs", 0.75, drawLogsIcon)
 
 		-- Active Indicator Bar
 		local ActiveBar = Instance.new("Frame")
@@ -615,7 +852,7 @@ User Request:
 		ForceSyncBtn.Name = "ForceSyncBtn"
 		ForceSyncBtn.Size = UDim2.new(1, 0, 0, 42)
 		ForceSyncBtn.BackgroundColor3 = Color3.fromRGB(0, 180, 120)
-		ForceSyncBtn.Text = "🔄 Force Git Sync Now"
+		ForceSyncBtn.Text = "Force Git Sync Now"
 		ForceSyncBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
 		ForceSyncBtn.Font = Enum.Font.GothamBold
 		ForceSyncBtn.TextSize = 14
@@ -681,7 +918,6 @@ User Request:
 		makeInputBlock("ApiKeyInput", "Google Gemini API Key:", "AI API key...", config.API_Key)
 		makeInputBlock("GithubUrlInput", "GitHub Raw Code URL:", "https://raw.githubusercontent.com/...", config.GitHub_URL)
 
-		-- Model Selection Grid Title
 		local modelLbl = Instance.new("TextLabel")
 		modelLbl.Size = UDim2.new(1, 0, 0, 15)
 		modelLbl.BackgroundTransparency = 1
@@ -692,7 +928,7 @@ User Request:
 		modelLbl.TextXAlignment = Enum.TextXAlignment.Left
 		modelLbl.Parent = SettingsList
 
-		-- Model Selection Grid Frame
+		-- Models Grid
 		local ModelGrid = Instance.new("Frame")
 		ModelGrid.Name = "ModelGrid"
 		ModelGrid.Size = UDim2.new(1, 0, 0, 72)
@@ -719,19 +955,19 @@ User Request:
 			corner.Parent = btn
 		end
 
-		makeModelSelectBtn("gemini-3.5-flash", "3.5 Flash")
-		makeModelSelectBtn("gemini-3.5-pro", "3.5 Pro")
-		makeModelSelectBtn("gemini-3.1-flash", "3.1 Flash")
-		makeModelSelectBtn("gemini-3.1-pro", "3.1 Pro")
-		makeModelSelectBtn("gemini-3.0-flash", "3.0 Flash")
+		-- Valid Gemini Production Models
+		makeModelSelectBtn("gemini-2.5-flash", "2.5 Flash")
+		makeModelSelectBtn("gemini-2.5-pro", "2.5 Pro")
+		makeModelSelectBtn("gemini-2.0-flash", "2.0 Flash")
+		makeModelSelectBtn("gemini-2.0-pro", "2.0 Pro")
+		makeModelSelectBtn("gemini-1.5-flash", "1.5 Flash")
 		makeModelSelectBtn("custom", "✏️ Custom")
 
-		-- Custom Model Input Box
 		local customModelInput = Instance.new("TextBox")
 		customModelInput.Name = "CustomModelInput"
 		customModelInput.Size = UDim2.new(1, 0, 0, 32)
 		customModelInput.BackgroundColor3 = Color3.fromRGB(28, 28, 35)
-		customModelInput.PlaceholderText = "e.g., gemini-flash-latest"
+		customModelInput.PlaceholderText = "e.g., gemini-1.5-pro-latest"
 		customModelInput.Text = config.Custom_Model or ""
 		customModelInput.TextColor3 = Color3.fromRGB(240, 240, 250)
 		customModelInput.TextSize = 12
@@ -844,12 +1080,16 @@ User Request:
 			pad.Parent = frame
 		end
 
+		makeChangelogEntry("v2.3.0 - Vector Graphics & Production Models", {
+			"Removed emojis and replaced them with crisp programmatic Lua vector designs.",
+			"Implemented an official vector-drawn Lua orbit logo.",
+			"Created vector-drawn tab icons (bubble, links, gear, doc) and lightning bolt toggle.",
+			"Corrected the default model list to valid Gemini API models (2.5/2.0/1.5 Flash & Pro)."
+		})
 		makeChangelogEntry("v2.2.0 - Client/Server Architecture", {
 			"Split server logic and client Tweens completely.",
 			"Added responsive animated hover and tactile press states.",
-			"Created animated opening and closing transitions.",
-			"Added Google Gemini 3.0 / 3.1 / 3.5 models selection.",
-			"Added custom model text input support."
+			"Created animated opening and closing transitions."
 		})
 		makeChangelogEntry("v2.1.0 - Interactive AI & Memory", {
 			"Created floating dark-mode UI overlay panel.",
@@ -898,7 +1138,6 @@ User Request:
 			config.Model = data.Model
 			config.Custom_Model = data.Custom_Model
 			
-			-- Save configurations securely
 			pcall(function()
 				if configStore then
 					configStore:SetAsync("Config", config)
@@ -950,7 +1189,7 @@ User Request:
 			end)
 		elseif action == "ForceSync" then
 			logToClients("[System] Force git sync triggered.", Color3.fromRGB(0, 200, 255))
-			lastGitHubCode = "" -- Reset to force download
+			lastGitHubCode = ""
 		end
 	end)
 
