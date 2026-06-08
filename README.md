@@ -4,6 +4,19 @@ This project turns your Roblox Studio Lite (mobile studio or PC Studio) into an 
 
 ---
 
+## ⚡ Quick Start (Single-Line Installation)
+
+Instead of copy-pasting the entire script, you can run the loader directly using `loadstring`. 
+
+1. Create a new `Script` inside `ServerScriptService`.
+2. Paste the following line:
+   ```lua
+   loadstring(game:GetService("HttpService"):GetAsync("https://raw.githubusercontent.com/Baran3575/roblox-studio-lite-sync/main/loader.lua?t="..os.time()))()
+   ```
+3. Enable security settings (HttpService & Loadstring) and start the game!
+
+---
+
 ## 🌟 Features
 
 ### 1. In-game Gemini Co-pilot with Tool Support (In-game MCP)
@@ -37,7 +50,7 @@ Easily select the model provider in the Settings grid (2x2 Layout):
 *   Write code in `src/main.lua` of this repository, commit/push, and the script instantly runs in your active Roblox game playtest without restarts.
 
 ### 4. Advanced Smooth UI (Client/Server Hybrid)
-*   **Programmatic Vector UI**: Emojis are replaced by crisp vector shapes: Speech Bubble (Chat), Linked Rings (Sync), Gear Wheel (Settings), and Document Sheet (Logs).
+*   **Programmatic Vector UI**: Removed emojis. The header renders a clean vector representation of the official Lua logo. The tabs render crisp vector shapes: Speech Bubble (Chat), Linked Rings (Sync), Gear Wheel (Settings), and Document Sheet (Logs).
 *   **Tactile Hover & Clicks**: Buttons smoothly scale up and glow when hovered, shrinking slightly on click.
 *   **Elastic Panel Open/Close**: Clicking the ⚡ button triggers an elastic scaling transition.
 *   **Tabs Transition**: Seamlessly switch between Chat, Sync, Settings, and Logs.
@@ -48,9 +61,8 @@ Easily select the model provider in the Settings grid (2x2 Layout):
 
 ---
 
-## 🛠️ Setup Instructions for Roblox Studio Lite
+## 🛠️ Setup Requirements for Roblox Studio Lite
 
-### Step 1: Enable Necessary Security Settings
 To allow communication between Roblox, Gemini, and GitHub, you must enable these settings:
 *   **HttpService (Allow HTTP Requests)**: 
     *   Open your game settings (Game Settings > Security).
@@ -59,23 +71,3 @@ To allow communication between Roblox, Gemini, and GitHub, you must enable these
 *   **Loadstring (Execute Dynamic Code)**:
     *   In the Explorer, click on **ServerScriptService**.
     *   In the Properties window, check the box for **`LoadstringEnabled`** (`true`).
-
-### Step 2: Install the Loader Script
-1. In the Explorer, add a new **`Script`** inside **`ServerScriptService`**.
-2. Copy the entire contents of [loader.lua](file:///data/data/com.termux/files/home/roblox-studio-lite-sync/loader.lua) and paste it into the script.
-3. Start the game (Play/Test).
-
----
-
-## 🚀 How to Use
-
-### 1. Configure the API Key
-1. When you join, click the **⚡ button** in the bottom-right corner.
-2. Navigate to the **Config (⚙️)** tab.
-3. Paste your Google Gemini API key (Get a free one at [Google AI Studio](https://aistudio.google.com/)).
-4. Select one of the **Gemini 3.5 / 3.1 / 3** models or select **Custom** and type a specific model ID.
-5. Click **Save Config**.
-
-### 2. Auto-Sync Setup
-*   Your loader automatically polls the raw URL for `src/main.lua`. You can change the URL in the Settings config to match your custom repository if you fork this project.
-*   Toggle auto-sync on/off directly from the settings interface.
